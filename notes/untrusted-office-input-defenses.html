@@ -1,0 +1,194 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Defensive Screening Before LLM Triage: Untrusted Emails, Attachments, and CSVs — Andre Romero-Carey</title>
+  <meta name="description" content="Defensive engineering notes on inbox-guard: binary header magic-byte verification, Unicode RLO (U+202E) extension spoofing detection, accounting-safe OWASP CSV formula neutralization, Unicode Tag (U+E0000..U+E007F) &amp; CSS-hidden prompt-override screening, and deterministic session-scoped PII tokenization.">
+  <meta name="author" content="Andre Romero-Carey">
+  <link rel="canonical" href="https://kilianthemagnificent.github.io/notes/untrusted-office-input-defenses.html">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2318181b'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='700' fill='%23fcfcfa' text-anchor='middle'%3EAR%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="container">
+    <header class="site-header">
+      <a class="site-brand" href="../">Andre Romero-Carey</a>
+      <nav class="site-nav" aria-label="Primary">
+        <a href="../">All Notes</a>
+        <a href="lean4-verifier-adversarial-suite.html">← Previous Note</a>
+        <a href="https://github.com/KilianTheMagnificent/inbox-guard">inbox-guard Repo</a>
+        <a href="https://github.com/KilianTheMagnificent">GitHub</a>
+      </nav>
+    </header>
+
+    <article>
+      <div class="article-meta">
+        Published 2026-11-16 · Repository: <a href="https://github.com/KilianTheMagnificent/inbox-guard"><code>KilianTheMagnificent/inbox-guard</code></a> · Node.js 20+ (zero external dependencies)
+      </div>
+      <h1>Defensive Screening Before LLM Triage: Untrusted Emails, Attachments, and CSVs</h1>
+      <p class="article-lede">
+        Back-office operational workflows—accounts payable, vendor onboarding, remittance matching—sit directly on an unauthenticated external boundary: anyone can send an email, attach an "invoice," or submit a CSV schedule. This note details the deterministic pre-LLM screening architecture implemented in <code>inbox-guard</code>.
+      </p>
+
+      <nav class="toc" aria-label="Table of contents">
+        <div class="toc-title">Contents</div>
+        <ol>
+          <li><a href="#pipeline-boundary">Why Back-Office LLM Triage Needs a Deterministic Pre-Filter</a></li>
+          <li><a href="#attachment-screening">Attachment Screening: Magic Bytes, Double Extensions &amp; Bidi Spoofing</a></li>
+          <li><a href="#csv-neutralization">Accounting-Safe OWASP CSV Formula Neutralization</a></li>
+          <li><a href="#email-inspection">Concealed Text: Plane-14 Unicode Tags &amp; CSS-Hidden Overrides</a></li>
+          <li><a href="#pii-tokenization">Deterministic Session-Scoped PII Tokenization</a></li>
+          <li><a href="#boundaries">Architectural Boundaries &amp; Limitations</a></li>
+        </ol>
+      </nav>
+
+      <h2 id="pipeline-boundary" class="no-rule">1. Why Back-Office LLM Triage Needs a Deterministic Pre-Filter</h2>
+      <p>
+        Operational email pipelines combine two distinct risk surfaces:
+      </p>
+      <ol>
+        <li><strong>Classical document &amp; spreadsheet hazards aimed at human reviewers:</strong> disguised executables claiming a <code>.pdf</code> extension, Unicode bidirectional filename spoofing, and spreadsheet formula/DDE payloads exported into reconciliation queues opened in Excel, LibreOffice Calc, or Google Sheets.</li>
+        <li><strong>Model-boundary hazards aimed at automated triage:</strong> invisible Unicode characters or zero-opacity HTML blocks that human reviewers never see in a rendered preview but HTML-to-text extractors feed verbatim into language-model prompts, alongside raw personal and banking identifiers crossing external API boundaries.</li>
+      </ol>
+      <p>
+        <a href="https://github.com/KilianTheMagnificent/inbox-guard"><code>inbox-guard</code></a> isolates these checks into a small, auditable, zero-dependency ES module library (using only Node's built-in <code>node:test</code> runner and verified with CodeQL) that runs <em>before</em> inbound artifacts touch a parser, model API, or operator queue.
+      </p>
+
+      <h2 id="attachment-screening">2. Attachment Screening: Magic Bytes, Double Extensions &amp; Bidi Spoofing</h2>
+      <p>
+        Relying on MIME headers or <code>path.extname()</code> alone fails against trivial filename and content spoofing. In <a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/main/src/attachment.mjs"><code>src/attachment.mjs</code></a>, <code>checkAttachment({ filename, headBytes })</code> evaluates metadata and leading file bytes independently, accumulating structured severity-graded findings rather than short-circuiting on the first match:
+      </p>
+
+      <h3>Unicode Bidirectional Override (<code>U+202E</code>) &amp; Path-Traversal Checks</h3>
+      <p>
+        Unicode Right-to-Left Override (<code>U+202E</code>) and directional isolate/embedding characters (<code>U+202A..U+202E</code>, <code>U+2066..U+2069</code>) reverse the visual display order of subsequent characters without changing the underlying code-point sequence read by an OS shell. For example, the raw string <code>invoice_\u202Efdp.scr</code> terminates in <code>.scr</code> (a Windows screensaver executable), yet renders visually to an accounts-payable clerk as <code>invoice_rcs.pdf</code>.
+      </p>
+      <p>
+        <code>checkAttachment</code> rejects any filename matching <code>/[\u202A-\u202E\u2066-\u2069]/</code> (<code>UNICODE_BIDI_SPOOF</code>), ASCII control or null bytes <code>/[\x00-\x1F\x7F]/</code> (<code>CONTROL_CHAR_FILENAME</code>), and directory separators or parent-directory segments (<code>/</code>, <code>\</code>, <code>..</code> → <code>PATH_TRAVERSAL_FILENAME</code>).
+      </p>
+
+      <h3>Extension Policy &amp; Double-Extension Decoys</h3>
+      <p>
+        Terminal extensions are checked against a 38-entry blocklist (<code>BLOCKED_EXTENSIONS</code>) covering native binaries and installers (<code>.exe</code>, <code>.scr</code>, <code>.msi</code>, <code>.dll</code>, <code>.app</code>, <code>.pkg</code>), disk images and shortcuts (<code>.lnk</code>, <code>.iso</code>, <code>.img</code>, <code>.vhd</code>, <code>.dmg</code>), shell/script formats (<code>.ps1</code>, <code>.vbs</code>, <code>.hta</code>, <code>.wsf</code>, <code>.jar</code>, <code>.command</code>, <code>.sh</code>), and macro-enabled Office templates (<code>.docm</code>, <code>.xlsm</code>, <code>.pptm</code>, <code>.dotm</code>, <code>.xltm</code>). When a multi-dot filename pairs a benign decoy penultimate token (<code>pdf</code>, <code>csv</code>, <code>xlsx</code>, <code>docx</code>, <code>png</code>, etc.) with a blocked terminal extension—such as <code>PO_Revision_1042.pdf.exe</code>—it additionally emits <code>DOUBLE_EXTENSION_DECOY</code>.
+      </p>
+
+      <h3>Leading Magic-Byte Header Verification</h3>
+      <p>
+        When leading bytes (<code>headBytes</code>, e.g., the first 512 bytes read by <code>bin/inbox-guard.mjs</code>) are supplied, <code>checkAttachment</code> inspects binary signatures independent of claimed filename:
+      </p>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Finding Code</th>
+              <th>Byte Signature / Condition</th>
+              <th>Defensive Rationale</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>EXECUTABLE_MAGIC_BYTES</code></td>
+              <td><code>4D 5A</code> (<code>MZ</code> PE), <code>7F 45 4C 46</code> (<code>\x7FELF</code>), or Mach-O <code>CF FA ED FE</code> / <code>FE ED FA CF</code> / <code>CA FE BA BE</code></td>
+              <td>Flags native Windows, Linux, and macOS universal binaries even when renamed to <code>wire-instructions.pdf</code>.</td>
+            </tr>
+            <tr>
+              <td><code>PDF_HEADER_MISMATCH</code></td>
+              <td>Extension is <code>.pdf</code> without leading <code>25 50 44 46 2D</code> (<code>%PDF-</code>)</td>
+              <td>Rejects non-PDF payloads (archives, scripts, PE binaries, or corrupted blobs) masquerading as PDFs before downstream PDF text extraction.</td>
+            </tr>
+            <tr>
+              <td><code>PNG_HEADER_MISMATCH</code></td>
+              <td>Extension is <code>.png</code> without 8-byte PNG signature <code>89 50 4E 47 0D 0A 1A 0A</code></td>
+              <td>Verifies genuine PNG framing prior to OCR or vision-model ingestion.</td>
+            </tr>
+            <tr>
+              <td><code>HTML_SCRIPT_IN_PLAINTEXT</code></td>
+              <td>Extension is <code>.csv</code> or <code>.txt</code> whose first 256 UTF-8 bytes contain <code>&lt;script</code>, <code>&lt;!doctype html</code>, or <code>&lt;html</code></td>
+              <td>Catches HTML smuggling and browser-executed script documents disguised as plaintext accounting exports.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="csv-neutralization">3. Accounting-Safe OWASP CSV Formula Neutralization</h2>
+      <p>
+        When untrusted vendor fields (memo lines, payee names, invoice notes) or LLM-extracted tables are exported to CSV and opened in spreadsheet software, cells starting with <code>=</code>, <code>+</code>, <code>-</code>, or <code>@</code>—including cells preceded by leading tabs or newlines—are interpreted as executable formulas or Dynamic Data Exchange (DDE) commands (e.g., <code>=WEBSERVICE(...)</code>, <code>=IMPORTXML(...)</code>, or tab-prefixed <code>\t=HYPERLINK(...)</code>).
+      </p>
+      <p>
+        Standard OWASP CSV Injection guidance recommends prefixing a single quote (<code>'</code>) to every cell starting with <code>=</code>, <code>+</code>, <code>-</code>, or <code>@</code>. In financial back-office software, applying that rule blindly breaks production accounting workflows: legitimate credit memos and negative balances like <code>-1250.00</code>, <code>-1,420.55</code>, or <code>-4.25%</code> begin with <code>-</code>, and turning them into single-quoted text strings breaks downstream summation and ledger reconciliation.
+      </p>
+      <p>
+        In <a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/main/src/csv.mjs"><code>src/csv.mjs</code></a>, <code>isFormulaInjectionCell</code> and <code>sanitizeCsvRows</code> resolve this tension deterministically:
+      </p>
+<pre><code>const FORMULA_TRIGGERS = new Set(["=", "+", "-", "@"]);
+const PLAIN_NEGATIVE_NUMBER_RE = /^-\d+(?:,\d{3})*(?:\.\d+)?%?$/;
+
+export function isFormulaInjectionCell(value, { allowNegativeNumbers = true } = {}) {
+  if (typeof value !== "string" || value.length === 0) return false;
+  const trimmedStart = value.replace(/^[\t\r\n ]+/, "");
+  if (trimmedStart.length === 0) return false;
+
+  const first = trimmedStart[0];
+  if (value[0] === "\t" || value[0] === "\r" || value[0] === "\n") {
+    if (FORMULA_TRIGGERS.has(first)) return true;
+  }
+
+  if (!FORMULA_TRIGGERS.has(first)) return false;
+  if (first === "-" &amp;&amp; allowNegativeNumbers &amp;&amp; PLAIN_NEGATIVE_NUMBER_RE.test(trimmedStart.trim())) {
+    return false;
+  }
+  return true;
+}</code></pre>
+      <ul>
+        <li><strong>Control-whitespace bypasses stay blocked:</strong> Any cell beginning with <code>\t</code>, <code>\r</code>, or <code>\n</code> followed by a formula trigger immediately returns <code>true</code> and is neutralized with a leading <code>'</code>.</li>
+        <li><strong>Strict numeric grammar for negative figures:</strong> Only plain negative integers, comma-grouped thousands, decimals, and percentages matching <code>/^-\d+(?:,\d{3})*(?:\.\d+)?%?$/</code> pass untouched when <code>allowNegativeNumbers</code> is enabled. Expressions containing operators, cell references, or function calls after a leading minus (such as <code>-2+3</code> or <code>-A1</code>) fail the regex and are neutralized alongside structured <code>{ row, column, originalPreview }</code> audit coordinates.</li>
+      </ul>
+
+      <h2 id="email-inspection">4. Concealed Text: Plane-14 Unicode Tags &amp; CSS-Hidden Overrides</h2>
+      <p>
+        Indirect prompt injection in email triage frequently exploits discrepancies between what a human operator sees in a mail client and what a downstream text extractor passes to a model. <a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/main/src/email.mjs"><code>src/email.mjs</code></a> (<code>inspectInboundEmail</code>) screens four distinct layers:
+      </p>
+      <ol>
+        <li><strong>Sender vs. Reply-To domain divergence (<code>REPLY_TO_DOMAIN_MISMATCH</code>):</strong> Extracts and compares domain suffixes on <code>From</code> and <code>Reply-To</code> headers, flagging cross-domain reply redirection (e.g., <code>ap@supplier.example</code> paired with <code>collector@wire-redirect.example</code>).</li>
+        <li><strong>Zero-width &amp; Plane-14 Unicode Tag stripping (<code>INVISIBLE_UNICODE_CHARS</code>):</strong> Matches zero-width spaces/joiners (<code>U+200B..U+200F</code>, <code>U+2060..U+2064</code>, <code>U+FEFF</code>), bidi controls (<code>U+202A..U+202E</code>, <code>U+2066..U+2069</code>), and Plane-14 Unicode Tag characters (<code>U+E0000..U+E007F</code>, encoded in JavaScript UTF-16 strings as surrogate pairs <code>\uDB40[\uDC00-\uDC7F]</code>). Severity escalates from <code>low</code> (incidental BOM/joiner) to <code>high</code> when 8 or more invisible code points appear, and all matched code points are stripped from <code>sanitizedSubject</code> and <code>sanitizedText</code>.</li>
+        <li><strong>CSS-hidden HTML blocks (<code>HIDDEN_HTML_CONTENT</code>):</strong> Scans raw HTML inline styles for <code>display:none</code>, <code>visibility:hidden</code>, <code>opacity:0</code> (using negative lookahead <code>(?![.\d])</code> so legitimate styles like <code>opacity:0.85</code> are not false-flagged), and zero-sized text (<code>font-size:0</code> with optional units).</li>
+        <li><strong>Normalization-first override pattern scan (<code>INSTRUCTION_OVERRIDE_PATTERN</code>):</strong> Critically, <code>inspectInboundEmail</code> strips <code>INVISIBLE_UNICODE_RE</code> <em>before</em> evaluating instruction-override patterns so zero-width characters interleaved inside words cannot evade token matching.</li>
+      </ol>
+
+      <h2 id="pii-tokenization">5. Deterministic Session-Scoped PII Tokenization</h2>
+      <p>
+        Even after screening attachments and hidden markup, passing raw customer SSNs, bank/card account numbers, phone numbers, or email addresses to an external model API expands data-exposure scope unnecessarily—especially when the model only needs entity relationships to classify an inquiry or draft a response template.
+      </p>
+      <p>
+        In <a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/main/src/redact.mjs"><code>src/redact.mjs</code></a>, <code>createRedactor()</code> provides deterministic, session-scoped tokenization:
+      </p>
+      <ul>
+        <li><strong>Case-normalized entity stability:</strong> Lookup keys are normalized via <code>`${kind}:${rawValue.toLowerCase()}`</code> inside an ephemeral per-session <code>Map</code>. Within a single triage session, both <code>jane.doe@example.com</code> and <code>JANE.DOE@example.com</code> resolve to <code>&lt;EMAIL_1&gt;</code>, preserving coreference across multi-message threads while keeping the mapping strictly in local memory.</li>
+        <li><strong>Ordered pattern precedence:</strong> <code>redact()</code> applies <code>EMAIL_RE</code>, <code>SSN_RE</code> (excluding invalid SSN prefixes <code>000</code>, <code>666</code>, and <code>9xx</code>), <code>LONG_ACCOUNT_RE</code> (12–19 digit sequences), and <code>PHONE_RE</code> in strict order—running <code>LONG_ACCOUNT_RE</code> before <code>PHONE_RE</code> so 16-digit account/card numbers are never partially tokenized as 10-digit phone numbers.</li>
+        <li><strong>Local restoration for human review:</strong> Once a draft response is returned, <code>redactor.restore(draft)</code> substitutes local tokens (<code>&lt;EMAIL_1&gt;</code>, <code>&lt;ACCOUNT_1&gt;</code>) back to original values strictly inside the local boundary for human review.</li>
+      </ul>
+
+      <h2 id="boundaries">6. Architectural Boundaries &amp; Limitations</h2>
+      <p>
+        Deterministic input screening reduces attack surface substantially, but syntactic filters alone cannot guarantee immunity against open-ended semantic prompt injection in natural-language prose. In production systems (including the design of <a href="https://meetkestrel.com/security">Kestrel</a>), <code>inbox-guard</code> is paired with three structural invariants:
+      </p>
+      <ul>
+        <li><strong>Deterministic arithmetic:</strong> Totals, variances, and ledger balances are computed in deterministic code—never delegated to language-model token prediction.</li>
+        <li><strong>Least-privilege context:</strong> Identifiers are tokenized locally prior to external API calls, and cross-session token maps are never shared across tenants.</li>
+        <li><strong>Human-gated execution:</strong> Language-model outputs are staged strictly as reviewable drafts; outbound emails, wire approvals, and ledger mutations require explicit human action.</li>
+      </ul>
+
+      <div class="callout">
+        <strong>Verification &amp; Vulnerability Disclosure</strong>
+        <code>inbox-guard</code> is tested via Node's built-in test runner (<code>npm test</code>) and continuous CodeQL analysis, and accepts private bypass reports via GitHub's <a href="https://github.com/KilianTheMagnificent/inbox-guard/security/advisories/new">Private Vulnerability Reporting</a> per <a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/main/SECURITY.md"><code>SECURITY.md</code></a>.
+      </div>
+    </article>
+
+    <footer class="site-footer">
+      <span><a href="../">← Back to Security &amp; Verification Notes</a></span>
+      <span><a href="lean4-verifier-adversarial-suite.html">← Previous: Lean 4 Verifier Adversarial Suite</a></span>
+    </footer>
+  </div>
+</body>
+</html>

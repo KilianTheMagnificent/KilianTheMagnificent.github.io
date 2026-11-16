@@ -1,0 +1,263 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Adversarial Soundness Testing for AI-Authored Lean 4 Proofs — Andre Romero-Carey</title>
+  <meta name="description" content="Architecture of the 5-layer Lean 4 proof verifier in open-proofs, its 48-case adversarial bypass test suite, and automated negation proofs uncovering upstream misformalizations in google-deepmind/formal-conjectures#7590.">
+  <meta name="author" content="Andre Romero-Carey">
+  <link rel="canonical" href="https://kilianthemagnificent.github.io/notes/lean4-verifier-adversarial-suite.html">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2318181b'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='700' fill='%23fcfcfa' text-anchor='middle'%3EAR%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="container">
+    <header class="site-header">
+      <a class="site-brand" href="../">Andre Romero-Carey</a>
+      <nav class="site-nav" aria-label="Primary">
+        <a href="../">All Notes</a>
+        <a href="untrusted-office-input-defenses.html">Next Note →</a>
+        <a href="https://github.com/KilianTheMagnificent/open-proofs">open-proofs Repo</a>
+        <a href="https://github.com/KilianTheMagnificent">GitHub</a>
+      </nav>
+    </header>
+
+    <article>
+      <div class="article-meta">
+        Published 2026-10-24 · Repository: <a href="https://github.com/KilianTheMagnificent/open-proofs"><code>KilianTheMagnificent/open-proofs</code></a> · Upstream pin: Lean <code>v4.33.1</code>
+      </div>
+      <h1>Adversarial Soundness Testing for AI-Authored Lean 4 Proofs</h1>
+      <p class="article-lede">
+        When autonomous coding agents write formal proofs without line-by-line human review, running <code>lake build</code> and grepping for <code>sorry</code> is not a sound trust boundary. This note documents the 5-layer verification architecture in <code>open-proofs</code>, its 48-case adversarial self-test suite, and how machine-checked negation proofs surfaced quantified-parameter misformalizations reported in <a href="https://github.com/google-deepmind/formal-conjectures/issues/7590"><code>google-deepmind/formal-conjectures#7590</code></a>.
+      </p>
+
+      <nav class="toc" aria-label="Table of contents">
+        <div class="toc-title">Contents</div>
+        <ol>
+          <li><a href="#threat-model">Threat Model: Untrusted Provers in a Rich Elaborator</a></li>
+          <li><a href="#five-layers">The 5-Layer Verification Pipeline</a></li>
+          <li><a href="#adversarial-suite">Adversarial Bypass Taxonomy (48 Self-Test Expectations)</a></li>
+          <li><a href="#misformalizations">Finding Upstream Misformalizations via Negation Proofs (#7590)</a></li>
+          <li><a href="#reproducibility">Reproducibility &amp; Audit Artifacts</a></li>
+        </ol>
+      </nav>
+
+      <h2 id="threat-model" class="no-rule">1. Threat Model: Untrusted Provers in a Rich Elaborator</h2>
+      <p>
+        Interactive theorem provers based on dependent type theory follow the de Bruijn criterion: a small kernel checks elaborated proof terms, so buggy tactics cannot silently produce false theorems. That guarantee holds when a human trusts the surrounding build configuration, environment, and theorem statement. It breaks down when an unattended language-model agent has write access to a workspace and is rewarded for making a build succeed.
+      </p>
+      <p>
+        In <a href="https://github.com/KilianTheMagnificent/open-proofs"><code>open-proofs</code></a>, AI agents (Claude Code and Codex) attempt open placeholder declarations (<code>sorry</code>) from <a href="https://github.com/google-deepmind/formal-conjectures"><code>google-deepmind/formal-conjectures</code></a> (pinned at commit <code>96343eeb5990ff13735e728cd0195eff0156a3bb</code> on Lean <code>v4.33.1</code> and Mathlib <code>0df444a360ea</code>). No human reads the resulting tactic scripts line by line. Instead, the candidate proof is treated as untrusted input that may attempt—intentionally or via reward-hacking—to:
+      </p>
+      <ul>
+        <li>Alter the target problem by redefining upstream predicates, overriding local typeclass instances, or adding vacuous hypotheses;</li>
+        <li>Import or transitively reference an upstream declaration whose own body still rests on <code>sorryAx</code>;</li>
+        <li>Substitute compiled native code for logical reduction via <code>native_decide</code>, <code>@[extern]</code>, or <code>@[implemented_by]</code>;</li>
+        <li>Manipulate the Lean environment during elaboration via metaprogramming (<code>run_cmd</code> + <code>addDecl</code> with <code>debug.skipKernelTC</code> enabled); or</li>
+        <li>Tamper with <code>lakefile.toml</code>, <code>lean-toolchain</code>, cached <code>.olean</code> artifacts, or dependency checkouts in <code>.lake/packages/</code>.</li>
+      </ul>
+
+      <h2 id="five-layers">2. The 5-Layer Verification Pipeline</h2>
+      <p>
+        The driver <a href="https://github.com/KilianTheMagnificent/open-proofs/blob/main/scripts/check.py"><code>scripts/check.py</code></a> accepts a claim only if five sequential layers pass, recording the SHA-256 hash of the trusted verifier base alongside every ledger entry:
+      </p>
+
+      <h3>Layer 1 — Workspace &amp; Dependency Integrity (<code>integrity</code>)</h3>
+      <p>
+        Before inspecting any Lean source, <code>check.integrity()</code> verifies that <code>lean-toolchain</code>, <code>upstream.json</code>, <code>lakefile.toml</code>, and <code>lake-manifest.json</code> agree on the exact toolchain (<code>leanprover/lean4:v4.33.1</code>), <code>formal_conjectures</code> commit, and <code>mathlib</code> revision. For every dependency in <code>.lake/packages/</code>, it verifies <code>git rev-parse HEAD</code> and enforces an empty <code>git status --porcelain --untracked-files=all</code> working tree so neither tracked upstream theorems nor untracked helper files can be planted inside dependencies.
+      </p>
+      <p>
+        It also rejects executable Lean lakefiles (<code>lakefile.lean</code>) altogether and audits <code>lakefile.toml</code> against 15 forbidden build keys (<code>moreLeanArgs</code>, <code>weakLeanArgs</code>, <code>moreServerArgs</code>, <code>plugins</code>, <code>dynlibs</code>, <code>loadDynlibPaths</code>, <code>precompileModules</code>, <code>nativeFacets</code>, etc.) and trust-weakening patterns (<code>debug.</code>, <code>skipKernelTC</code>, <code>trustLevel</code>, <code>trust</code>).
+      </p>
+
+      <h3>Layer 2 — Dual-Pass Source Lint (<code>lint</code>)</h3>
+      <p>
+        <a href="https://github.com/KilianTheMagnificent/open-proofs/blob/main/scripts/lint.py"><code>scripts/lint.py</code></a> walks the transitive <code>OpenProofs.*</code> source import closure of a candidate module and enforces role-specific policies (<code>result</code> vs. <code>statement</code>):
+      </p>
+      <ul>
+        <li><strong>Comment/string-stripped code rules:</strong> A custom lexer strips line comments, nested block comments (<code>/- ... -/</code>), string literals, and character literals while preserving line numbers, then scans against word-boundary bans covering placeholders (<code>sorry</code>, <code>admit</code>, <code>stop</code>), axioms and non-terminating/foreign declarations (<code>axiom</code>, <code>opaque</code>, <code>unsafe</code>, <code>partial</code>, <code>implemented_by</code>, <code>extern</code>, <code>export</code>, <code>csimp</code>, <code>@[init]</code>), native evaluation (<code>native_decide</code>, <code>+native</code>, <code>ofReduceBool</code>, <code>reduceBool</code>, <code>trustCompiler</code>), syntax/elaborator extensions (<code>macro</code>, <code>syntax</code>, <code>elab</code>, <code>notation</code>), metaprogramming execution (<code>run_cmd</code>, <code>run_elab</code>, <code>run_meta</code>, <code>run_tac</code>, <code>#eval</code>), and environment APIs (<code>addDecl*</code>, <code>modifyEnv</code>, <code>setEnv</code>, <code>Lean.Elab</code>, <code>Lean.Kernel</code>).</li>
+        <li><strong>Unstripped raw-text scan:</strong> For high-impact tokens (<code>sorry</code>, <code>admit</code>, <code>native_decide</code>, <code>implemented_by</code>, <code>skipKernelTC</code>, <code>ofReduceBool</code>, <code>trustCompiler</code>, <code>run_cmd</code>, <code>#eval</code>, <code>addDecl*</code>), the linter also scans the raw unstripped file. Even if a malformed string or comment delimiter attempted to confuse a source lexer, those tokens cannot appear anywhere in candidate files.</li>
+        <li><strong>Import allowlisting &amp; statement purity:</strong> Candidate proofs may import only <code>Mathlib</code>, <code>Batteries</code>, <code>Aesop</code>, <code>Plausible</code>, <code>FormalConjectures*</code>, and <code>OpenProofs.{Results,Lib}.*</code>. Self-recorded negation/variant statements under <code>OpenProofs/Statements/</code> are restricted to pure <code>theorem ... := sorry</code> declarations—banning <code>def</code>, <code>abbrev</code>, <code>instance</code>, <code>structure</code>, <code>notation</code>, and <code>variable</code> so statement files cannot smuggle altered definitions.</li>
+      </ul>
+
+      <h3>Layer 3 — Artifact Purge &amp; Clean Build (<code>build</code>)</h3>
+      <p>
+        Before invoking <code>lake build</code>, <code>clean_outputs()</code> deletes all existing <code>.olean</code>, <code>.ilean</code>, and IR artifacts under <code>.lake/build/lib/lean</code> and <code>.lake/build/ir</code> for every candidate module in the source import closure. This prevents stale-artifact mismatches where edited source passes the linter while downstream environment inspection reads an older pre-compiled <code>.olean</code>.
+      </p>
+
+      <h3>Layer 4 — Compiled Environment Audit (<code>opcheck</code>)</h3>
+      <p>
+        Source linting is defense in depth; the authoritative semantic check is <a href="https://github.com/KilianTheMagnificent/open-proofs/blob/main/OpenProofsChecker/Main.lean"><code>OpenProofsChecker/Main.lean</code></a> (<code>opcheck</code>), a standalone Lean 4 binary that inspects compiled <code>.olean</code> files at runtime. Crucially, <code>opcheck</code> loads both the candidate module and the pinned reference module with extension hooks disabled:
+      </p>
+<pre><code>let env &lt;- importModules #[{ module := args.module }, { module := args.refModule }] {}
+  (trustLevel := 0) (loadExts := false) (level := .private)</code></pre>
+      <p>
+        Setting <code>trustLevel := 0</code> and <code>loadExts := false</code> ensures no <code>@[init]</code> procedures, environment-extension hooks, or custom pretty-printers from candidate code execute inside the checker process. <code>opcheck</code> then evaluates nine structured checks:
+      </p>
+      <ol>
+        <li><code>module_origins</code>: Resolves canonical filesystem paths (<code>IO.FS.realPath</code>) for every loaded module's <code>.olean</code>, classifying each strictly into <code>core</code>, <code>package:&lt;name&gt;</code>, or <code>candidate</code>, and failing on any unknown origin.</li>
+        <li><code>ref_trusted</code>: Confirms the reference declaration is a <code>.thmInfo</code> declared directly inside the named reference module—either inside <code>.lake/packages/formal_conjectures</code> (for <code>upstream</code> claims) or <code>OpenProofs.Statements.*</code> (for <code>variant</code> claims).</li>
+        <li><code>theorem_found</code>: Verifies the candidate declaration is a non-<code>unsafe</code> <code>.thmInfo</code> originating in candidate code, blocking attempts to point a claim directly at an already-proved upstream theorem or at an <code>axiom</code>.</li>
+        <li><code>statement_match</code>: Aligns universe parameters and tests whether the candidate theorem's elaborated <code>Expr</code> type is syntactically identical to the reference theorem's <code>Expr</code> type (<code>syntactic</code> identity). When elaboration chooses different but definitionally equal typeclass instance paths, <code>opcheck</code> constructs a synthetic bridge declaration (<code>theorem _opcheck_statement_bridge : &lt;refType&gt; := &lt;candidateThm&gt;</code>) and submits it directly to <code>Kernel.Environment.addDecl</code> (<code>kernel-defeq</code> identity).</li>
+        <li><code>statement_consts</code>: Checks <code>refCi.type.getUsedConstants</code> to ensure every constant mentioned in the target statement resides in trusted core, Mathlib, or upstream modules—never candidate code.</li>
+        <li><code>axioms</code>: Performs an explicit recursive body traversal (<code>walkAxioms</code>) across <code>.defnInfo</code>, <code>.thmInfo</code>, <code>.opaqueInfo</code>, <code>.axiomInfo</code>, and <code>.inductInfo</code> constants without trusting cached axiom lists in <code>.olean</code> metadata. Only <code>propext</code>, <code>Classical.choice</code>, and <code>Quot.sound</code> are permitted; missing constants become loud sentinel failures.</li>
+        <li><code>closure_clean</code>: Confirms candidate modules never import <code>OpenProofs.Statements.*</code> or <code>OpenProofsChecker.*</code>.</li>
+        <li><code>candidate_decls</code>: Iterates over every constant (including private declarations via <code>privateToUserName?</code>) across all candidate modules in the import closure. Rejects <code>axiom</code>, <code>opaque</code>, <code>quot</code>, <code>unsafe</code>, <code>partial</code>, <code>@[implemented_by]</code>, <code>@[extern]</code>, <code>@[export]</code>, and <code>@[init]</code>; requires every declaration to live under the <code>OpenProofs.</code> namespace (with a narrow, verified exception for Lean's on-demand equation theorems <code>f.eq_&lt;digits&gt;</code>, <code>f.eq_def</code>, and <code>f.eq_unfold</code> generated for trusted definitions); and checks <code>properSuffixes</code> so no candidate definition, structure, or instance can shadow a trusted name.</li>
+        <li><code>kernel_replay</code>: Re-reads raw module data parts and replays every candidate module's constants from scratch atop its clean imports via <code>env.replay</code>.</li>
+      </ol>
+
+      <h3>Layer 5 — Independent Toolchain Kernel Replay (<code>leanchecker</code>)</h3>
+      <p>
+        Finally, <code>scripts/check.py</code> invokes the Lean toolchain's standalone <code>lake env leanchecker &lt;module&gt;</code> on every candidate module in the import closure, providing an independent process-isolated kernel verification pass.
+      </p>
+
+      <h2 id="adversarial-suite">3. Adversarial Bypass Taxonomy (48 Self-Test Expectations)</h2>
+      <p>
+        A verifier without negative tests inevitably drifts as compiler internals evolve. <a href="https://github.com/KilianTheMagnificent/open-proofs/blob/main/tests/run_adversarial.py"><code>tests/run_adversarial.py</code></a> runs <strong>48 automated expectations</strong> across three test groups: <strong>10 source-linter parser-evasion tests</strong>, <strong>9 workspace/lakefile integrity tamper probes</strong>, and <strong>29 end-to-end Lean modules</strong> specified in <a href="https://github.com/KilianTheMagnificent/open-proofs/blob/main/tests/adversarial/cases.json"><code>tests/adversarial/cases.json</code></a> (25 bypass/hygiene rejection cases plus 4 positive controls such as kernel <code>decide</code> and compiler-realized equation lemmas).
+      </p>
+      <p>
+        Crucially, <code>cases.json</code> asserts both <code>must_fail</code> <em>and</em> <code>must_pass</code> checks per module. Verifying that specific downstream layers reject a bypass even when orthogonal checks pass proves that defense in depth actually holds—for example, confirming that <code>opcheck</code> catches semantic shadowing or <code>skipKernelTC</code> tampering independently of the Python source linter.
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Bypass Category</th>
+              <th>Representative Test Cases</th>
+              <th>Mechanism &amp; Catching Layers</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><strong>Compiler &amp; FFI substitution</strong></td>
+              <td><code>Extern</code>, <code>ImplementedBy</code>, <code>NativeDecide</code>, <code>OpaqueDecl</code>, <code>UnsafePartial</code>, <code>lint/csimp_flagged</code></td>
+              <td>
+                <code>@[extern]</code> and <code>@[implemented_by]</code> bind logical definitions to arbitrary C or replacement Lean functions during compiled evaluation, while <code>native_decide</code> introduces <code>Lean.ofReduceBool</code> / <code>Lean.trustCompiler</code> axioms to trust native code execution. Caught by <code>lint</code>, <code>opcheck:axioms</code> (for <code>native_decide</code>), and <code>opcheck:candidate_decls</code> (inspecting compiler attribute tables on <code>.olean</code> constants).
+              </td>
+            </tr>
+            <tr>
+              <td><strong>Axiom smuggling &amp; placeholder laundering</strong></td>
+              <td><code>SorryDirect</code>, <code>MacroSorry</code>, <code>SorryViaUpstream</code>, <code>ImportsStatement</code>, <code>LibSorryUse</code>, <code>CustomAxiom</code>, <code>AxiomClaim</code></td>
+              <td>
+                Hiding <code>sorry</code> inside a tactic macro, declaring the target theorem itself as an <code>axiom</code>, or proving an open problem by citing the upstream theorem's own <code>sorry</code>-backed declaration (<code>SorryViaUpstream</code> passes <code>lint</code> and <code>statement_match</code>!). Caught by <code>opcheck:axioms</code> full body walk (detecting <code>sorryAx</code> or custom axioms), <code>opcheck:theorem_found</code>, and <code>opcheck:closure_clean</code>.
+              </td>
+            </tr>
+            <tr>
+              <td><strong>Definition &amp; instance shadowing</strong></td>
+              <td><code>ShadowDef</code>, <code>InstanceOverride</code>, <code>WeakenedStatement</code>, <code>CandidateDef</code>, <code>FakeEqLemma</code></td>
+              <td>
+                Redefining <code>Erdos349.IsGoodPair</code> locally as <code>True</code> so the surface syntax matches upstream while the elaborated <code>Expr</code> differs (<code>ShadowDef</code>), or registering a high-priority local <code>instance : LE ℕ</code> where <code>≤</code> resolves to <code>True</code> (<code>InstanceOverride</code>). Both pass <code>lint</code> and <code>axioms</code>, and are caught deterministically by <code>opcheck:statement_match</code> and <code>opcheck:candidate_decls</code> suffix-shadowing checks.
+              </td>
+            </tr>
+            <tr>
+              <td><strong>Environment tampering (kernel bypass)</strong></td>
+              <td><code>SkipKernelTC</code></td>
+              <td>
+                Uses <code>set_option debug.skipKernelTC true</code> inside <code>run_cmd</code> to call <code>addDecl</code> with a theorem of type <code>False</code> backed by <code>True.intro</code>. Notice that <code>statement_match</code> and <code>axioms</code> both <em>pass</em> because no axiom constant appears in the term! Caught across three layers: <code>lint</code>, <code>opcheck:kernel_replay</code>, and <code>leanchecker</code>.
+              </td>
+            </tr>
+            <tr>
+              <td><strong>Lexer evasion &amp; build tampering</strong></td>
+              <td><code>char_literal_quote_cannot_hide_sorry</code>, <code>nested_comment_close_handled</code>, <code>tracked_upstream_edit_rejected</code>, <code>lakefile_rejects:*</code></td>
+              <td>
+                Probes single-quote character literals (<code>'"'</code>), unterminated strings, nested comments (<code>/- /- -/ ... -/</code>), edits/untracked files inside <code>.lake/packages/formal_conjectures</code>, <code>lakefile.lean</code> injection, and <code>moreLeanArgs = ["-Ddebug.skipKernelTC=true"]</code> in <code>lakefile.toml</code>. Caught by <code>lint</code> (stripped + raw dual scan) and <code>integrity</code>.
+              </td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <h2 id="misformalizations">4. Finding Upstream Misformalizations via Negation Proofs (#7590)</h2>
+      <p>
+        Running automated proof search behind a strict checker has a useful side effect: when an open mathematical conjecture appears "disproved" in seconds, the verifier confirms whether the formal Lean statement genuinely contradicts itself. Across 142 verified claims in <code>open-proofs</code> (131 proved targets and 11 misformalization certificates), automated triage identified a recurring specification defect in open value-question theorems in <code>google-deepmind/formal-conjectures</code>.
+      </p>
+      <p>
+        In Lean formalizations of "determine the value of <em>X</em>" problems, upstream uses an <code>answer(...)</code> placeholder constant intended to be filled in once solved. When a theorem quantifies over an input parameter (such as an upper bound <code>N</code>, dimension <code>n</code>, progression length <code>k</code>, or real constant <code>c</code>), typing the placeholder as a fixed constant rather than a function of that parameter asserts that a <em>single</em> parameter-independent value satisfies the predicate simultaneously for all parameters.
+      </p>
+      <p>
+        On October 24, 2026, I reported eight affected declarations across seven upstream files in <a href="https://github.com/google-deepmind/formal-conjectures/issues/7590"><code>google-deepmind/formal-conjectures#7590</code></a> (following earlier upstream reports on the same pattern), accompanied by answer-free machine-checked negation proofs verifying that each formal statement is false for <em>every</em> possible choice of placeholder:
+      </p>
+
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Upstream Declaration</th>
+              <th>Omitted Parameter</th>
+              <th>Machine-Checked Counterexample Mechanism</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>erdos_142</code>, <code>erdos_142.variants.isTheta</code></td>
+              <td><code>k : ℕ</code></td>
+              <td><code>r 0 N = N</code> whereas <code>r 2 N ≤ 1</code>; no single function is asymptotic or <code>Θ</code> to both.</td>
+            </tr>
+            <tr>
+              <td><code>erdos_319</code></td>
+              <td><code>N : ℕ</code></td>
+              <td>Maximum admissible set size is <code>≤ 1</code> at <code>N = 1</code>, but <code>≥ 3</code> at <code>N = 6</code> via <code>{2, 3, 6}</code> since <code>1/2 - 1/3 - 1/6 = 0</code> with no vanishing nonempty proper subset.</td>
+            </tr>
+            <tr>
+              <td><code>erdos_321</code></td>
+              <td><code>N : ℕ</code></td>
+              <td><code>R 0 = 0</code> while <code>R 1 ≥ 1</code>.</td>
+            </tr>
+            <tr>
+              <td><code>erdos_361</code></td>
+              <td><code>c : ℝ</code></td>
+              <td>At <code>n = 2</code>, the quantity equals <code>0</code> for <code>c = 1/4</code> and <code>1</code> for <code>c = 1</code>.</td>
+            </tr>
+            <tr>
+              <td><code>erdos_409.variants.sigma</code></td>
+              <td><code>n : ℕ</code></td>
+              <td>Least iteration count is <code>0</code> at <code>n = 2</code> and positive at <code>n = 6</code> (<code>σ(6) - 1 = 11</code> is prime).</td>
+            </tr>
+            <tr>
+              <td><code>erdos_503</code></td>
+              <td><code>n : ℕ</code></td>
+              <td>In <code>ℝ^0</code> the maximum size is at most <code>1</code>; in <code>ℝ^1</code> it is at least <code>2</code>.</td>
+            </tr>
+            <tr>
+              <td><code>erdos_692.parts.ii</code></td>
+              <td><code>n : ℕ</code></td>
+              <td>Setting <code>n</code> equal to candidate answer <code>m</code> yields <code>δ₁(m, m) = 0</code>, whereas <code>δ₁(m, m + 2) = 1/(m + 1) &gt; 0</code>.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+
+      <p>
+        Rather than depending on the upstream <code>sorry</code>-backed <code>answer</code> constant (which Layer 4's <code>axioms</code> walk would rightly reject due to <code>sorryAx</code>), each certificate proves the universally quantified negation directly. For example, in <a href="https://github.com/KilianTheMagnificent/open-proofs/blob/main/OpenProofs/Results/Erdos/P319_no_constant_answer.lean"><code>P319_no_constant_answer.lean</code></a>:
+      </p>
+<pre><code>theorem erdos_319.no_constant_answer : ∀ a : ℕ, ¬ ∀ N : ℕ, IsGreatest
+    { #A | (A) (_ : A ⊆ Finset.Icc 1 N)
+      (_ : ∃ δ : ℕ → ℤˣ, ∑ n ∈ A, (δ n : ℚ) / n = 0 ∧
+        ∀ A' ⊂ A, A'.Nonempty → ∑ n ∈ A', (δ n : ℚ) / n ≠ 0) } a</code></pre>
+      <p>
+        Every negation proof compiles cleanly against <code>formal-conjectures</code> <code>96343ee</code>, passes all five checker layers, and depends exclusively on the standard axioms <code>{propext, Classical.choice, Quot.sound}</code>. The fix is straightforward and structural: parameterize the <code>answer</code> definition over the quantified variable (e.g., <code>def erdos_319.answer : ℕ → ℕ := sorry</code> applied as <code>erdos_319.answer N</code>).
+      </p>
+
+      <div class="callout">
+        <strong>Human-Gated Disclosure Policy</strong>
+        Autonomous agents in <code>open-proofs</code> are strictly prohibited from opening issues, submitting pull requests, or posting externally. Candidate findings are written exclusively to local draft files in <a href="https://github.com/KilianTheMagnificent/open-proofs/tree/main/outbox"><code>outbox/</code></a> for manual human verification and explicit AI disclosure prior to any upstream report.
+      </div>
+
+      <h2 id="reproducibility">5. Reproducibility &amp; Audit Artifacts</h2>
+      <p>
+        The complete verifier source, adversarial test fixtures, and proof ledger are publicly available under Apache-2.0 in <a href="https://github.com/KilianTheMagnificent/open-proofs"><code>KilianTheMagnificent/open-proofs</code></a>:
+      </p>
+<pre><code>lake exe cache get
+lake build
+python3 scripts/check.py --all       # re-verify all 142 claims across 5 layers
+python3 tests/run_adversarial.py     # run all 48 adversarial bypass expectations</code></pre>
+    </article>
+
+    <footer class="site-footer">
+      <span><a href="../">← Back to Security &amp; Verification Notes</a></span>
+      <span><a href="untrusted-office-input-defenses.html">Next: Untrusted Office Input Defenses →</a></span>
+    </footer>
+  </div>
+</body>
+</html>
