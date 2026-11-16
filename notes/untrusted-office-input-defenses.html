@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Screening Untrusted Office Inputs Before LLM Triage — Andre Romero-Carey</title>
-  <meta name="description" content="Design, code mechanics, and known limitations of inbox-guard: magic-byte attachment checks, Unicode U+202E and Windows/SMB filename spoofing, accounting-safe OWASP CSV neutralization, HTML entity/CSS-hidden prompt-override screening, and single-pass PII tokenization.">
+  <meta name="description" content="Design, code mechanics, and known limitations of inbox-guard: magic-byte attachment checks, Unicode U+202E and Windows/SMB filename spoofing, accounting-safe OWASP CSV neutralization, WHATWG HTML5 comment and linear CSS hidden-content scanning, and randomized session-scoped PII tokenization.">
   <meta name="author" content="Andre Romero-Carey">
   <link rel="canonical" href="https://kilianthemagnificent.github.io/notes/untrusted-office-input-defenses.html">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2318181b'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='700' fill='%23fcfcfa' text-anchor='middle'%3EAR%3C/text%3E%3C/svg%3E">
@@ -24,7 +24,7 @@
 
     <article>
       <div class="article-meta">
-        Published 2026-11-16 · Repo: <a href="https://github.com/KilianTheMagnificent/inbox-guard"><code>KilianTheMagnificent/inbox-guard</code></a> (<code>83f2f02</code>) · Runtime: Node.js &gt;= 20 (zero external dependencies)
+        Published 2026-11-16 · Repo: <a href="https://github.com/KilianTheMagnificent/inbox-guard"><code>KilianTheMagnificent/inbox-guard</code></a> (<code>351773c</code>) · Runtime: Node.js &gt;= 20 (zero external dependencies)
       </div>
       <h1>Screening Untrusted Office Inputs Before LLM Triage</h1>
       <p class="article-lede">
@@ -36,27 +36,27 @@
         <ol>
           <li><a href="#attachment-screening">Attachment Canonicalization &amp; Magic-Byte Screening (<code>src/attachment.mjs</code>)</a></li>
           <li><a href="#csv-neutralization">CSV Formula Neutralization &amp; RFC-4180 Serialization (<code>src/csv.mjs</code>)</a></li>
-          <li><a href="#email-inspection">Header Spoofing, Plane-14 Tags &amp; CSS-Hidden Markup (<code>src/email.mjs</code>)</a></li>
-          <li><a href="#pii-tokenization">Single-Pass Session-Scoped PII Tokenization (<code>src/redact.mjs</code>)</a></li>
+          <li><a href="#email-inspection">Header Spoofing, WHATWG HTML5 Comments &amp; Linear CSS Parsing (<code>src/email.mjs</code>)</a></li>
+          <li><a href="#pii-tokenization">Randomized Session-Scoped PII Tokenization (<code>src/redact.mjs</code>)</a></li>
           <li><a href="#limitations">Scope &amp; Known Limitations</a></li>
         </ol>
       </nav>
 
       <h2 id="attachment-screening" class="no-rule">1. Attachment Canonicalization &amp; Magic-Byte Screening (<code>src/attachment.mjs</code>)</h2>
       <p>
-        Checking only MIME headers or <code>path.extname()</code> misses visual extension spoofing, OS-specific filename canonicalization quirks, and renamed native binaries. <a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/main/src/attachment.mjs"><code>checkAttachment({ filename, headBytes })</code></a> (lines 132–423) evaluates filename normalization and leading byte signatures independently, returning every matching finding:
+        Checking only MIME headers or <code>path.extname()</code> misses visual extension spoofing, OS-specific filename canonicalization quirks, and renamed binaries or archives. <a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/main/src/attachment.mjs"><code>checkAttachment({ filename, headBytes })</code></a> (lines 266–621) evaluates filename normalization and leading byte signatures independently, returning every matching finding:
       </p>
 
       <h3>Filename Canonicalization, Bidi Overrides &amp; OS Edge Cases</h3>
       <ul>
-        <li><strong>Unicode bidirectional spoofing (<code>UNICODE_BIDI_SPOOF</code>, lines 28, 145–151):</strong> Matches <code>/[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/</code>. Right-to-Left Override (<code>U+202E</code>) flips the displayed character order of an extension so <code>invoice_\u202Efdp.scr</code> renders visually as <code>invoice_rcs.pdf</code> while ending in <code>.scr</code> on disk.</li>
-        <li><strong>Windows/SMB trailing dots, NTFS streams &amp; null-byte truncation (lines 161–230):</strong> Windows and SMB strip trailing dots and spaces when writing files to disk, turning <code>invoice.exe.</code> or <code>invoice.exe </code> back into an executable <code>.exe</code>. <code>checkAttachment</code> flags trailing dots/whitespace (<code>TRAILING_DOT_OR_SPACE</code>), NTFS <code>:</code> Alternate Data Stream syntax (<code>NTFS_ADS_FILENAME</code>), directory traversal or drive prefixes (<code>PATH_TRAVERSAL_FILENAME</code>), deceptive Unicode/null extension padding (<code>EXTENSION_PADDING</code>), and ASCII control bytes (<code>CONTROL_CHAR_FILENAME</code>), while canonicalizing the underlying basename and pre-null segment (<code>invoice.exe\x00.pdf</code>) so the hidden terminal extension is still classified.</li>
-        <li><strong>Extension policy sets (lines 1–26, 231–285):</strong> Classifies extensions into <strong>75 blocked executable/script/macro/query formats</strong> (<code>BLOCKED_EXTENSIONS</code>: <code>.exe</code>, <code>.scr</code>, <code>.lnk</code>, <code>.msi</code>, <code>.ps1</code>, <code>.hta</code>, <code>.iso</code>, <code>.dmg</code>, <code>.docm</code>, <code>.xlsm</code>, <code>.xll</code>, <code>.iqy</code>, <code>.slk</code>, etc. → <code>BLOCKED_EXTENSION</code>), <strong>12 active local markup formats</strong> that execute JavaScript or external loads when opened locally (<code>ACTIVE_CONTENT_EXTENSIONS</code>: <code>.svg</code>, <code>.svgz</code>, <code>.html</code>, <code>.htm</code>, <code>.xhtml</code>, <code>.mhtml</code>, <code>.xml</code>, <code>.xslt</code>, etc. → <code>ACTIVE_CONTENT_EXTENSION</code>), and <strong>16 archive container formats</strong> whose inner entries have not been unpacked and screened (<code>ARCHIVE_CONTAINER_EXTENSIONS</code>: <code>.zip</code>, <code>.7z</code>, <code>.rar</code>, <code>.tar</code>, <code>.gz</code>, etc. → <code>UNINSPECTED_ARCHIVE_CONTAINER</code>). Multi-dot filenames pairing one of 14 benign document tokens with a blocked or active terminal extension (e.g., <code>PO_1042.pdf.exe</code> or <code>receipt.pdf.svg</code>) emit <code>DOUBLE_EXTENSION_DECOY</code>.</li>
+        <li><strong>Unicode bidirectional &amp; dot-leader spoofing (lines 45, 49, 279–285, 333–339):</strong> <code>BIDI_OVERRIDE_RE</code> (<code>/[\u061C\u200E\u200F\u202A-\u202E\u2066-\u2069]/</code>) catches Right-to-Left Override (<code>U+202E</code>) and directional marks (<code>UNICODE_BIDI_SPOOF</code>)—where <code>invoice_\u202Efdp.scr</code> renders visually as <code>invoice_rcs.pdf</code> while ending in <code>.scr</code> on disk—and <code>DOT_LEADER_SPOOF_RE</code> (<code>/[\u2024\u2025\u3002\uFE52\uFF0E]/</code>) flags Unicode dot-leader and fullwidth period lookalikes (<code>UNICODE_DOT_SPOOF</code>).</li>
+        <li><strong>Windows/SMB trailing dots, NTFS <code>:stream</code> ADS, reserved device stems &amp; padding (lines 46–51, 159–187, 287–399):</strong> Windows and SMB strip trailing dots and spaces when saving files, turning <code>invoice.exe.</code> or <code>invoice.exe </code> back into <code>.exe</code> (<code>TRAILING_DOT_OR_SPACE</code>, lines 325–331). <code>findNtfsAdsColonIndex</code> (lines 159–187) flags NTFS Alternate Data Stream syntax such as <code>invoice.pdf:evil.exe</code> and <code>file.exe::$DATA</code> (<code>NTFS_ADS_FILENAME</code>, lines 315–323) without false-positiving on spaces around colons (<code>A: Smith.pdf</code>) or numeric timestamps (<code>Invoice 10:30.pdf</code>). Directory separators and drive prefixes emit <code>PATH_TRAVERSAL_FILENAME</code> (lines 295–308, without false-positiving on benign double dots inside filenames such as <code>Acme Inc..pdf</code> or <code>Report...final.pdf</code>). <code>WINDOWS_RESERVED_STEM_RE</code> (lines 50–51, 360–371) rejects DOS/NT device stems (<code>CON</code>, <code>PRN</code>, <code>AUX</code>, <code>NUL</code>, <code>COM1..9</code>, <code>LPT1..9</code>, including superscript digits → <code>WINDOWS_RESERVED_FILENAME</code>), while null/whitespace/Unicode-filler padding (<code>U+200B</code>, Hangul filler <code>U+3164</code> → <code>EXTENSION_PADDING</code>, lines 341–358) and ASCII/C1 control bytes (<code>CONTROL_CHAR_FILENAME</code>, lines 287–293) are flagged alongside inspection of pre-null (<code>invoice.exe\x00.pdf</code>) and ADS stream segments (lines 387–399, 427–441).</li>
+        <li><strong>Extension policy sets (lines 1–43, 401–455):</strong> Classifies extensions into <strong>104 blocked executable/script/package/macro/query formats</strong> (<code>BLOCKED_EXTENSIONS</code>, lines 1–15: <code>.exe</code>, <code>.scr</code>, <code>.lnk</code>, <code>.msi</code>, <code>.ps1</code>, <code>.ps1xml</code>, <code>.wsc</code>, <code>.sct</code>, <code>.hta</code>, <code>.iso</code>, <code>.dmg</code>, <code>.appx</code>, <code>.msix</code>, <code>.library-ms</code>, <code>.search-ms</code>, <code>.one</code>, <code>.doc</code>, <code>.xls</code>, <code>.ppt</code>, <code>.docm</code>, <code>.xlsm</code>, <code>.xll</code>, <code>.iqy</code>, <code>.slk</code>, etc. → <code>BLOCKED_EXTENSION</code>), <strong>14 active local markup/message formats</strong> (<code>ACTIVE_CONTENT_EXTENSIONS</code>, lines 17–20: <code>.svg</code>, <code>.svgz</code>, <code>.html</code>, <code>.htm</code>, <code>.xhtml</code>, <code>.shtml</code>, <code>.htmlz</code>, <code>.mht</code>, <code>.mhtml</code>, <code>.xml</code>, <code>.xsl</code>, <code>.xslt</code>, <code>.swf</code>, <code>.eml</code> → <code>ACTIVE_CONTENT_EXTENSION</code>), and <strong>17 archive/container formats</strong> whose inner entries have not been unpacked and screened (<code>ARCHIVE_CONTAINER_EXTENSIONS</code>, lines 22–25: <code>.zip</code>, <code>.7z</code>, <code>.rar</code>, <code>.tar</code>, <code>.gz</code>, <code>.tgz</code>, <code>.bz2</code>, <code>.xz</code>, <code>.zst</code>, <code>.cab</code>, <code>.msg</code>, etc. → <code>UNINSPECTED_ARCHIVE_CONTAINER</code>). Multi-dot filenames pairing one of <strong>14 benign decoy tokens</strong> (<code>BENIGN_DECOY_EXTENSIONS</code>, lines 27–30) with a blocked or active terminal extension emit <code>DOUBLE_EXTENSION_DECOY</code> (lines 443–455).</li>
       </ul>
 
       <h3>Leading Magic-Byte Verification &amp; Truncated-Buffer Handling</h3>
       <p>
-        When <code>headBytes</code> (<code>Uint8Array</code>, <code>ArrayBuffer</code>, <code>TypedArray</code>, or byte array) is provided, <code>classifySignatureMatch</code> (lines 70–82) distinguishes three outcomes—<code>"match"</code>, <code>"truncated"</code>, and <code>"mismatch"</code>—so empty or short slices emit <code>TRUNCATED_OR_EMPTY_BYTES</code> instead of returning a false-clean pass or a false format-mismatch claim:
+        When <code>headBytes</code> is supplied, <code>normalizeHeadBytes</code> (lines 88–100) rejects non-byte inputs such as raw strings with <code>INVALID_HEADER_BYTES</code> (lines 458–466), and <code>classifySignatureMatch</code> (lines 107–119) distinguishes <code>"match"</code>, <code>"truncated"</code>, and <code>"mismatch"</code> so empty or partial byte slices emit <code>TRUNCATED_OR_EMPTY_BYTES</code> (lines 468–475, 595–601) rather than a false pass or false mismatch:
       </p>
       <div class="table-wrap">
         <table>
@@ -70,23 +70,28 @@
           <tbody>
             <tr>
               <td><code>EXECUTABLE_MAGIC_BYTES</code></td>
-              <td><code>4D 5A</code> (<code>MZ</code> PE), <code>7F 45 4C 46</code> (<code>\x7FELF</code>), Mach-O / Java class headers (<code>CF FA ED FE</code>, <code>FE ED FA CF</code>, <code>CE FA ED FE</code>, <code>CA FE BA BE</code>), or <code>#!/</code> shebang</td>
-              <td>Native Windows, Linux, or macOS binaries and scripts renamed to benign document extensions like <code>wire-instructions.pdf</code>.</td>
+              <td><code>4D 5A</code> (<code>MZ</code> PE), <code>7F 45 4C 46</code> (<code>\x7FELF</code>), Mach-O / Java class headers (<code>CF FA ED FE</code>, <code>FE ED FA CF</code>, <code>CE FA ED FE</code>, <code>FE ED FA CE</code>, <code>CA FE BA BE</code>, <code>CA FE BA BF</code>), or <code>#!</code> shebang (<code>#!/bin/sh</code>, <code>#! /bin/sh</code>, lines 78–86)</td>
+              <td>Native Windows, Linux, or macOS binaries and interpreter scripts renamed to document extensions like <code>wire-instructions.pdf</code>.</td>
             </tr>
             <tr>
               <td><code>ARCHIVE_MAGIC_MISMATCH</code></td>
-              <td><code>Rar!\x1A\x07</code>, 7z (<code>37 7A BC AF 27 1C</code>), or gzip (<code>1F 8B</code>) bytes on a non-archive extension</td>
-              <td>Compressed archives masquerading as flat documents.</td>
+              <td><code>PK\x03\x04</code> / <code>PK\x05\x06</code> / <code>PK\x07\x08</code> ZIP bytes outside <code>ARCHIVE_CONTAINER_EXTENSIONS</code> (17) and <code>ZIP_PACKAGE_EXTENSIONS</code> (7: <code>.docx</code>, <code>.xlsx</code>, <code>.pptx</code>, <code>.odt</code>, <code>.ods</code>, <code>.odp</code>, <code>.epub</code>), or <code>Rar!</code>, <code>7z</code>, <code>gzip</code>, <code>bzip2</code> (<code>BZh1..9</code>), <code>xz</code>, <code>zstd</code>, or <code>MSCF</code> CAB bytes on a non-archive extension (lines 496–528)</td>
+              <td>ZIP or compressed archive containers disguised under flat document or plaintext extensions (<code>.txt</code>, <code>.csv</code>, <code>.pdf</code>, <code>.doc</code>).</td>
             </tr>
             <tr>
-              <td><code>PDF_HEADER_MISMATCH</code>, <code>PNG_HEADER_MISMATCH</code>, <code>JPEG_HEADER_MISMATCH</code>, <code>GIF_HEADER_MISMATCH</code>, <code>OOXML_HEADER_MISMATCH</code></td>
-              <td>Claimed <code>.pdf</code>, <code>.png</code>, <code>.jpg</code>/<code>.jpeg</code>, <code>.gif</code>, or <code>.docx</code>/<code>.xlsx</code>/<code>.pptx</code> lacking its required header (<code>%PDF-</code>, 8-byte PNG, JPEG SOI, GIF87a/89a, or PK/OLE2)</td>
-              <td>Header spoofing before files reach downstream PDF, image, or Office parsers.</td>
+              <td><code>OLE2_CONTAINER_MISMATCH</code></td>
+              <td><code>D0 CF 11 E0 A1 B1 1A E1</code> Compound File header outside <code>OLE2_PACKAGE_EXTENSIONS</code> (14 legacy extensions, lines 36–39, 530–536)</td>
+              <td>Macro-capable or encrypted OLE2 containers renamed to <code>.docx</code>, <code>.xlsx</code>, <code>.pptx</code>, <code>.csv</code>, or <code>.txt</code>.</td>
+            </tr>
+            <tr>
+              <td><code>PDF_HEADER_MISMATCH</code>, <code>PNG_HEADER_MISMATCH</code>, <code>JPEG_HEADER_MISMATCH</code>, <code>GIF_HEADER_MISMATCH</code>, <code>RTF_HEADER_MISMATCH</code>, <code>OOXML_HEADER_MISMATCH</code></td>
+              <td>Claimed <code>.pdf</code>, <code>.png</code>, <code>.jpg</code>/<code>.jpeg</code>, <code>.gif</code>, <code>.rtf</code>, or <code>.docx</code>/<code>.xlsx</code>/<code>.pptx</code> lacking its required leading bytes (<code>%PDF-</code>, 8-byte PNG, JPEG SOI, GIF87a/89a, <code>{\rtf</code>, or <code>PK</code> ZIP, lines 538–602)</td>
+              <td>Header spoofing before files reach downstream PDF, image, RTF, or OOXML parsers.</td>
             </tr>
             <tr>
               <td><code>HTML_SCRIPT_IN_PLAINTEXT</code></td>
-              <td>Leading 4 KB of <code>.csv</code> or <code>.txt</code> (including null-interleaved UTF-16) containing <code>&lt;script</code>, <code>&lt;!doctype html</code>, <code>&lt;html</code>, <code>&lt;svg</code>, <code>&lt;iframe</code>, or <code>&lt;hta:</code></td>
-              <td>HTML smuggling and active script payloads disguised as plaintext exports.</td>
+              <td>Leading 4 KB of 12 plaintext/legacy extensions (<code>TEXT_OR_LEGACY_DOC_EXTENSIONS</code>, lines 41–43, decoded across UTF-8, UTF-16LE/BE BOMs, and null-interleaved UTF-16, lines 189–258) containing <code>&lt;script</code>, <code>&lt;!doctype html</code>, <code>&lt;html</code>, <code>&lt;body</code>, <code>&lt;svg</code>, <code>&lt;iframe</code>, <code>&lt;object</code>, <code>&lt;embed</code>, <code>&lt;hta:</code>, MHTML <code>multipart/related</code> headers, or inline <code>on*=</code> handlers</td>
+              <td>HTML/MHTML smuggling and active script payloads disguised as CSV, text, or legacy document files.</td>
             </tr>
           </tbody>
         </table>
@@ -94,31 +99,30 @@
 
       <h2 id="csv-neutralization">2. CSV Formula Neutralization &amp; RFC-4180 Serialization (<code>src/csv.mjs</code>)</h2>
       <p>
-        Spreadsheet applications interpret cells starting with <code>=</code>, <code>+</code>, <code>-</code>, or <code>@</code>—including cells preceded by leading control whitespace or wrapped inside leading quotes (<code>"=CMD..."</code>)—as formulas or DDE expressions when a CSV is opened.
+        Spreadsheet applications interpret cells starting with <code>=</code>, <code>+</code>, <code>-</code>, <code>@</code>, or <code>|</code>—including fullwidth/small Unicode variants (<code>＝</code>, <code>＋</code>, <code>－</code>, <code>＠</code>), cells preceded by control/Unicode-whitespace/zero-width prefixes, or cells wrapped inside leading quotes (<code>"=CMD..."</code>)—as formulas or DDE expressions when a CSV is opened.
       </p>
       <p>
-        Quoting every cell starting with <code>-</code> follows generic OWASP CSV guidance, but breaks back-office accounting exports where negative currency figures (<code>-$1,250.00</code>, <code>-€99.95</code>), decimals (<code>-1,420.55</code>, <code>-.50</code>), percentages (<code>-12.5%</code>), and parenthesized credit balances (<code>($1,250.00)</code>) are routine numeric values. In <a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/main/src/csv.mjs"><code>src/csv.mjs</code></a> (lines 37–57):
+        Prefixing every cell starting with <code>-</code> breaks accounting exports where negative currency figures (<code>-$1,250.00</code>, <code>-1,250.00€</code>), decimals (<code>-1,420.55</code>, <code>-.50</code>), scientific notation (<code>-1.5E3</code>), percentages (<code>-12.5%</code>), and parenthesized credit balances (<code>($1,250.00)</code>) are ordinary numeric values. In <a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/main/src/csv.mjs"><code>src/csv.mjs</code></a> (lines 55–79):
       </p>
-<pre><code>const FORMULA_TRIGGERS = new Set(["=", "+", "-", "@"]);
-const LEADING_CONTROL_OR_QUOTE_RE = /^[\x00-\x20\u00A0\uFEFF"]+/;
-const LEADING_CONTROL_CHAR_RE = /^[\x00-\x1F\x7F]/;
-const SAFE_NEGATIVE_NUMBER_RE = /^-\s?[$€£¥]?(?:\d+(?:,\d{3})*(?:\.\d+)?|\.\d+)%?$/;
-
-export function isFormulaInjectionCell(value, { allowNegativeNumbers = true } = {}) {
+<pre><code>export function isFormulaInjectionCell(
+  value,
+  { allowNegativeNumbers = true, allowPipeTrigger = false } = {}
+) {
   if (typeof value !== "string" || value.length === 0) return false;
 
-  const stripped = value.replace(LEADING_CONTROL_OR_QUOTE_RE, "");
+  const stripped = value.replace(LEADING_CONTROL_SPACE_OR_QUOTE_RE, "");
   if (stripped.length === 0) return false;
 
   const first = stripped[0];
-  if (!FORMULA_TRIGGERS.has(first)) return false;
+  const isTrigger = BASE_FORMULA_TRIGGERS.has(first) || (!allowPipeTrigger &amp;&amp; first === "|");
+  if (!isTrigger) return false;
 
-  // Never exempt `-` when preceded by ASCII control characters (\t, \r, \n, \x0B, \x0C, etc.)
-  if (LEADING_CONTROL_CHAR_RE.test(value)) return true;
+  // Never exempt `-` when preceded by control characters, line separators, or invisible format chars
+  if (LEADING_UNSAFE_CONTROL_OR_INVISIBLE_RE.test(value)) return true;
 
   if (first === "-" &amp;&amp; allowNegativeNumbers) {
     const candidate = trimTrailingSpaceAndQuotes(stripped);
-    if (candidate.length &lt;= 64 &amp;&amp; SAFE_NEGATIVE_NUMBER_RE.test(candidate)) {
+    if (candidate.length &lt;= 128 &amp;&amp; SAFE_NEGATIVE_NUMBER_RE.test(candidate)) {
       return false;
     }
   }
@@ -126,50 +130,113 @@ export function isFormulaInjectionCell(value, { allowNegativeNumbers = true } = 
   return true;
 }</code></pre>
       <ul>
-        <li><strong>Control-character &amp; quote-wrapped triggers:</strong> <code>LEADING_CONTROL_OR_QUOTE_RE</code> strips leading ASCII control characters (<code>\x00-\x1F</code>, including <code>\t</code>, <code>\r</code>, <code>\n</code>, vertical tab <code>\x0B</code>, and form feed <code>\x0C</code>), spaces, NBSP, BOM, and leading double quotes before testing <code>FORMULA_TRIGGERS</code>, and <code>LEADING_CONTROL_CHAR_RE</code> blocks the negative-number exemption whenever an ASCII control character leads the cell (such as <code>\x0B-1250.00</code>).</li>
-        <li><strong>Strict negative-balance grammar:</strong> Only bounded numeric strings matching <code>SAFE_NEGATIVE_NUMBER_RE</code> pass untouched; cell references and arithmetic expressions after a minus sign (<code>-$A1</code>, <code>-SUM(A1:A4)</code>, <code>-1+1</code>) fail the match and receive a leading <code>'</code>.</li>
-        <li><strong>Parsed array contract &amp; <code>serializeCsvRow</code> (lines 79–132):</strong> <code>sanitizeCsvRows(rows)</code> operates on parsed 2D cell arrays (<code>string[][]</code>) and logs <code>{ row, column, originalPreview }</code> coordinates. <code>serializeCsvRow(row)</code> sanitizes cells idempotently and formats an RFC-4180 row, doubling internal <code>"</code> characters and quoting fields containing commas, quotes, CR/LF, tabs, vertical tabs, form feeds, or outer whitespace.</li>
+        <li><strong>Control, Unicode-space &amp; quote-wrapped triggers (lines 1–21):</strong> <code>LEADING_CONTROL_SPACE_OR_QUOTE_RE</code> strips leading ASCII/C1 control bytes (<code>\x00-\x20</code>, <code>\x7F-\x9F</code>, including <code>\t</code>, <code>\r</code>, <code>\n</code>, <code>\x0B</code>, <code>\x0C</code>), Unicode whitespace (<code>\s</code>, including NBSP <code>U+00A0</code>, ideographic space <code>U+3000</code>, line/paragraph separators <code>U+2028</code>/<code>U+2029</code>), zero-width/bidi/filler format characters (<code>U+200B..U+200F</code>, <code>U+3164</code>, <code>U+FE00..U+FE0F</code>, <code>U+FEFF</code>), and leading double quotes before testing <code>BASE_FORMULA_TRIGGERS</code> and <code>|</code>. <code>LEADING_UNSAFE_CONTROL_OR_INVISIBLE_RE</code> prevents exempting <code>-</code> whenever control, line-separator, or invisible format characters lead the cell (such as <code>\x0B-1250.00</code>).</li>
+        <li><strong>Strict negative-balance grammar (lines 26–27):</strong> <code>SAFE_NEGATIVE_NUMBER_RE</code> uses literal ASCII space (<code>\x20</code>) rather than <code>\s</code> so multi-line or tab-injected payloads (<code>-\n1+1</code>, <code>-\t=1+1</code>) alongside cell references and expressions (<code>-$A1</code>, <code>-SUM(A1:A4)</code>, <code>-1+1</code>) fail the check and receive a leading <code>'</code>.</li>
+        <li><strong>Parsed array contract &amp; <code>serializeCsvRow</code> (lines 101–159):</strong> <code>sanitizeCsvRows(rows, options)</code> validates that <code>rows</code> and every inner row satisfy <code>Array.isArray</code> and records <code>{ row, column, originalPreview }</code> coordinates. <code>serializeCsvRow(row, options)</code> sanitizes cells idempotently and formats an RFC-4180 row, doubling internal <code>"</code> characters and enclosing fields in double quotes whenever they contain commas, quotes, CR/LF, tabs, <code>\x0B</code>, <code>\x0C</code>, <code>U+2028</code>/<code>U+2029</code>, outer whitespace, or a neutralized leading <code>'</code>.</li>
       </ul>
 
-      <h2 id="email-inspection">3. Header Spoofing, Plane-14 Tags &amp; CSS-Hidden Markup (<code>src/email.mjs</code>)</h2>
+      <h2 id="email-inspection">3. Header Spoofing, WHATWG HTML5 Comments &amp; Linear CSS Parsing (<code>src/email.mjs</code>)</h2>
       <p>
-        Inbound HTML mail routed into automated triage can conceal text from human reviewers while exposing it verbatim to HTML-to-text extractors. <a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/main/src/email.mjs"><code>inspectInboundEmail</code></a> (lines 386–470) runs four deterministic checks using linear <code>O(n)</code> scanners to avoid regex backtracking on malformed HTML:
+        Inbound HTML mail routed into automated triage can hide instructions from human reviewers while exposing them to HTML-to-text extractors, or craft malformed comments and long attribute strings to stall backtracking regexes. <a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/main/src/email.mjs"><code>inspectInboundEmail</code></a> (lines 1296–1378) runs four checks in linear <code>O(n)</code> time:
       </p>
       <ol>
-        <li><strong>RFC 5322 / RFC 2047 sender spoofing (<code>FROM_DISPLAY_NAME_SPOOF</code> &amp; <code>REPLY_TO_DOMAIN_MISMATCH</code>, lines 290–427):</strong> <code>parseMailboxHeader</code> decodes RFC 2047 Base64/Quoted-Printable words and locates the angle-bracketed mailbox outside quoted display strings. If a display name embeds a different email address than the actual sender—such as <code>"ceo@company.com" &lt;attacker@evil.com&gt;</code>—it flags <code>FROM_DISPLAY_NAME_SPOOF</code> without false-flagging benign headers where display name and mailbox match (<code>"ap@x.com" &lt;ap@x.com&gt;</code>). Cross-domain <code>Reply-To</code> headers emit <code>REPLY_TO_DOMAIN_MISMATCH</code>.</li>
-        <li><strong>Invisible Unicode &amp; Plane-14 Tag stripping (<code>INVISIBLE_UNICODE_CHARS</code>, lines 3–4, 429–438, 466–467):</strong> Matches soft hyphens (<code>U+00AD</code>), grapheme/bidi controls, zero-width spaces/joiners, Plane-14 Unicode Tags (<code>U+E0000..U+E007F</code>), and Variation Selectors Supplement (<code>U+E0100..U+E01EF</code>)—including entity-encoded forms in HTML—escalating severity to <code>high</code> at 8+ characters and stripping them from <code>sanitizedSubject</code> and <code>sanitizedText</code>.</li>
-        <li><strong>Entity- &amp; escape-normalized HTML/CSS hiding (<code>HIDDEN_HTML_CONTENT</code>, lines 6–110, 142–237):</strong> Before testing <code>HIDDEN_HTML_STYLE_RE</code>, <code>containsHiddenCssDeclaration</code> decodes HTML decimal, hex, and named character references (<code>&amp;#58;</code>, <code>&amp;#x3a;</code>, <code>&amp;colon;</code>), strips CSS <code>/*...*/</code> comments (catching <code>display:/**/none</code>), and resolves CSS hex/character backslash escapes across both inline <code>style</code> attributes and <code>&lt;style&gt;</code> blocks. Checks cover <code>display:none</code>, <code>visibility:hidden|collapse</code>, <code>opacity:0</code> / <code>.0</code> (with negative lookahead <code>(?![.\d])</code> so <code>opacity:0.8</code> passes), <code>font-size:0</code>, <code>color:transparent</code>, zero-alpha <code>rgba()</code>/hex colors, off-screen negative offsets (<code>left:-9999px</code>), <code>transform:scale(0)</code>, and <code>clip-path:inset(50%|100%)</code>, alongside DOM attributes <code>hidden</code>, <code>aria-hidden="true"</code>, <code>&lt;input type="hidden"&gt;</code>, and <code>&lt;template&gt;</code>.</li>
-        <li><strong>Normalized override phrase scan (<code>INSTRUCTION_OVERRIDE_PATTERN</code>, lines 9–16, 239–288, 448–462):</strong> Strips HTML comments/tags, decodes entities, and strips <code>INVISIBLE_UNICODE_RE</code> before matching explicit instruction-override phrases so interleaved zero-width characters or inline formatting tags cannot split keywords.</li>
+        <li><strong>RFC 5322 / RFC 2047 sender &amp; comment spoofing (<code>FROM_DISPLAY_NAME_SPOOF</code> &amp; <code>REPLY_TO_DOMAIN_MISMATCH</code>, lines 1052–1333):</strong> <code>parseMailboxList</code> and <code>parseSingleMailbox</code> (lines 1132–1262) decode RFC 2047 Base64/Quoted-Printable words and distinguish <code>&lt;angle-addr&gt;</code> tokens, quoted strings, <code>(comment)</code> blocks, and bare <code>addr-spec</code> addresses—so <code>attacker@evil.example (ceo@company.com)</code> resolves <code>address = "attacker@evil.example"</code> and exposes <code>(ceo@company.com)</code> in <code>displayLabel</code>. <code>findSpoofedDisplayEmail</code> (lines 1264–1286) decodes HTML entities (<code>&amp;#64;</code>), folds fullwidth (<code>＠</code>) and Cyrillic/Greek confusable characters (<code>foldConfusables</code>, lines 82–128), and collapses spaced <code>@</code> tokens without false-positiving when a plain display name matches the actual address. Multi-address <code>Reply-To</code> headers are split with <code>splitTopLevelMailboxes</code> (lines 1088–1124) so a mismatched domain on any listed <code>Reply-To</code> address emits <code>REPLY_TO_DOMAIN_MISMATCH</code>.</li>
+        <li><strong>Invisible Unicode, Variation Selectors &amp; Plane-14 Tag stripping (<code>INVISIBLE_UNICODE_CHARS</code>, lines 4–5, 1335–1344, 1374–1375):</strong> <code>INVISIBLE_UNICODE_RE</code> detects soft hyphens (<code>U+00AD</code>), grapheme/bidi controls, Hangul/Braille/Khmer fillers (<code>U+3164</code>, <code>U+2800</code>, <code>U+FFA0</code>, <code>U+17B4..U+17B5</code>), zero-width spaces/joiners, BMP Variation Selectors (<code>U+FE00..U+FE0F</code>), interlinear annotations (<code>U+FFF9..U+FFFB</code>), Plane-14 Unicode Tags (<code>U+E0000..U+E007F</code>), and Variation Selectors Supplement (<code>U+E0100..U+E01EF</code>)—including entity-encoded forms in HTML (<code>&amp;#8203;</code>, <code>&amp;#xE0041;</code>)—escalating severity to <code>high</code> at 8+ characters and stripping them from <code>sanitizedSubject</code> and <code>sanitizedText</code>.</li>
+        <li><strong>WHATWG HTML5 comment scanner &amp; linear CSS declaration parser (<code>HIDDEN_HTML_CONTENT</code>, lines 48–50, 137–842, 885–987):</strong> Naive regex comment stripping (<code>/&lt;!--[\s\S]*?--&gt;/g</code>) diverges from HTML5 parsing on abrupt closures (<code>&lt;!--&gt;</code>, <code>&lt;!---&gt;</code>), bang closures (<code>&lt;!-- x --&gt;</code> vs. <code>&lt;!-- x --!&gt;</code>), and unclosed comments—allowing two malformed comments to swallow a hidden element in between while browsers still parse it. <code>scanHtmlCommentEnd</code> (lines 815–842) implements the WHATWG HTML5 comment state transitions directly and memoizes <code>state.noTerminator</code> so repeated unclosed <code>&lt;!--</code> sequences stay <code>O(n)</code>:</li>
       </ol>
+<pre><code>function scanHtmlCommentEnd(html, lt, state) {
+  const len = html.length;
+  let k = lt + 4;
+  if (k &lt; len &amp;&amp; html[k] === "&gt;") return k + 1;
+  if (k + 1 &lt; len &amp;&amp; html[k] === "-" &amp;&amp; html[k + 1] === "&gt;") return k + 2;
+  if (state.noTerminator) return -1;
 
-      <h2 id="pii-tokenization">4. Single-Pass Session-Scoped PII Tokenization (<code>src/redact.mjs</code>)</h2>
+  while (k &lt; len) {
+    let d = html.indexOf("--", k);
+    if (d === -1) {
+      state.noTerminator = true;
+      return -1;
+    }
+    while (d + 2 &lt; len &amp;&amp; html[d + 2] === "-") {
+      d += 1;
+    }
+    if (d + 2 &lt; len &amp;&amp; html[d + 2] === "&gt;") {
+      return d + 3;
+    }
+    if (d + 3 &lt; len &amp;&amp; html[d + 2] === "!" &amp;&amp; html[d + 3] === "&gt;") {
+      return d + 4;
+    }
+    k = d + 2;
+  }
+
+  state.noTerminator = true;
+  return -1;
+}</code></pre>
       <p>
-        <a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/main/src/redact.mjs"><code>createRedactor()</code></a> (lines 56–115) replaces structured identifiers with deterministic per-session placeholders before text leaves the local process:
+        For inline <code>style</code> attributes and <code>&lt;style&gt;</code> blocks, <code>decodeHtmlEntities</code> (lines 48–50, 137–166) strips arbitrary-length leading zeros on decimal and hex character references (<code>&amp;#x000000000000000000003a;</code>) and resolves named entities including <code>&amp;colon;</code>, <code>&amp;semi;</code>, <code>&amp;NewLine;</code>, and <code>&amp;Tab;</code>; <code>containsHiddenCssDeclaration</code> (lines 708–717) strips CSS <code>/*...*/</code> comments (testing both space and empty-string replacement to catch <code>dis/**/play:none</code>) and decodes CSS backslash escapes; and <code>checkCleanedCssDeclarations</code> (lines 569–706) plus <code>scanCleanedStylesheetRules</code> (lines 719–798) parse semicolon-delimited <code>prop: value</code> declarations and stylesheet rule blocks in strictly linear <code>O(n)</code> time (~2 ms on 200 KB adversarial inputs). Checks cover <code>display:none</code>, <code>visibility:hidden|collapse</code>, <code>content-visibility:hidden</code>, <code>opacity &lt;= 0.02</code> and <code>filter:opacity(...)</code> (via <code>parseCssNumberAndUnit</code>, lines 215–278, so <code>opacity:0.8</code> passes), <code>font-size &lt;= 1px</code> (<code>&lt;= 0.08em</code>/<code>rem</code>, <code>&lt;= 8%</code>, including <code>font</code> shorthand, while <code>0.75em</code> passes), <code>color:transparent</code> and near-zero-alpha <code>#rgba</code>/<code>#rrggbbaa</code>/<code>rgb()</code>/<code>rgba()</code>/<code>hsl()</code>/<code>oklch()</code>, matching solid foreground and background colors on the same rule (<code>color:#fff;background:#fff</code>), zero/1px dimensions paired with <code>overflow:hidden|clip</code>, offscreen negative offsets (<code>left:-999px</code>, <code>margin-left:-9999px</code>, <code>text-indent:-9999em</code>), near-zero <code>transform:scale(...)</code> / <code>scale:0</code>, and <code>clip:rect(0,0,0,0)</code> / <code>clip-path:circle(0)|ellipse(0...)|inset(50%)|polygon(0...)</code>, alongside DOM attributes <code>hidden</code>, <code>aria-hidden="true"</code>, <code>&lt;input type="hidden"&gt;</code>, <code>&lt;template&gt;</code>, and collapsed <code>&lt;details&gt;</code> (without <code>open</code>), while skipping conditional <code>@media (...)</code> / <code>print</code> / <code>speech</code> layout rules (lines 778–786).
       </p>
-<pre><code>const REDACT_RE = new RegExp(
+      <p>
+        Finally, <code>extractHtmlTextForInspection</code> (lines 989–1050) strips HTML5 comments and tags (collapsing inline formatting tags such as <code>&lt;span&gt;</code> and <code>&lt;b&gt;</code> without inserting whitespace), decodes entities, strips <code>INVISIBLE_UNICODE_RE</code>, and folds confusables before testing <code>PROMPT_OVERRIDE_PATTERNS</code> (<code>INSTRUCTION_OVERRIDE_PATTERN</code>, lines 7–14, 1354–1370).
+      </p>
+
+      <h2 id="pii-tokenization">4. Randomized Session-Scoped PII Tokenization (<code>src/redact.mjs</code>)</h2>
+      <p>
+        If a redactor emits predictable bare placeholders such as <code>&lt;ACCOUNT_1&gt;</code>, an untrusted sender can embed obfuscated text like <code>&lt;ACCOUNT\u200B_1&gt;</code> or fullwidth <code>＜ACCOUNT_1＞</code> that evades literal-token matching on input, gets normalized into <code>&lt;ACCOUNT_1&gt;</code> by a downstream LLM, and causes <code>restore()</code> to substitute another entity's real value into attacker-controlled output. <a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/main/src/redact.mjs"><code>createRedactor()</code></a> (lines 40–49 and 68–92) prevents token forgery by appending a per-session 6-hex-character CSPRNG nonce (<code>&lt;KIND_n_nonce&gt;</code>) by default:
+      </p>
+<pre><code>const LITERAL_TOKEN_SRC = String.raw`&lt;(?:EMAIL|SSN|PHONE|ACCOUNT|LITERAL)_\d+(?:_[0-9a-fA-F]{4,16})?&gt;`;
+
+const REDACT_RE = new RegExp(
   `(?&lt;email&gt;${EMAIL_SRC})|(?&lt;ssn&gt;${SSN_SRC})|(?&lt;intlPhone&gt;${INTL_PHONE_SRC})|(?&lt;account&gt;${ACCOUNT_SRC})|(?&lt;nanpPhone&gt;${NANP_PHONE_SRC})|(?&lt;literal&gt;${LITERAL_TOKEN_SRC})`,
   "g"
 );
-const RESTORE_TOKEN_RE = /&lt;(?:EMAIL|SSN|PHONE|ACCOUNT|LITERAL)_\d+&gt;/g;</code></pre>
+
+// Single-pass restoration regex; matches both nonced (`&lt;EMAIL_1_9f2c1a&gt;`) and deterministic
+// (`&lt;EMAIL_1&gt;`) tokens, substituting only tokens present in this session's `tokenToValue` map.
+const RESTORE_TOKEN_RE = /&lt;(?:EMAIL|SSN|PHONE|ACCOUNT|LITERAL)_\d+(?:_[0-9a-f]{6})?&gt;/g;</code></pre>
+<pre><code>export function createRedactor({ deterministic = false } = {}) {
+  const sessionNonce = deterministic ? "" : `_${randomBytes(3).toString("hex")}`;
+  const valueToToken = new Map();
+  const tokenToValue = new Map();
+  const counts = { EMAIL: 0, SSN: 0, PHONE: 0, ACCOUNT: 0 };
+  let literalCount = 0;
+
+  function assignToken(kind, rawValue) {
+    const normalizedKey =
+      kind === "LITERAL" ? `LITERAL:${rawValue}` : `${kind}:${rawValue.toLowerCase()}`;
+    if (valueToToken.has(normalizedKey)) {
+      return valueToToken.get(normalizedKey);
+    }
+    let token;
+    if (kind === "LITERAL") {
+      literalCount += 1;
+      token = `&lt;LITERAL_${literalCount}${sessionNonce}&gt;`;
+    } else {
+      counts[kind] += 1;
+      token = `&lt;${kind}_${counts[kind]}${sessionNonce}&gt;`;
+    }
+    valueToToken.set(normalizedKey, token);
+    tokenToValue.set(token, rawValue);
+    return token;
+  }</code></pre>
       <ul>
-        <li><strong>Single-pass tokenization &amp; literal placeholder isolation:</strong> <code>redact()</code> matches standard and quoted RFC 5321 emails, hyphenated US SSNs (excluding unassigned SSA prefixes <code>000</code>, <code>666</code>, <code>900–999</code>), <code>+</code>-prefixed ITU-T E.164/E.123 international phones (7–15 digits, optional <code>(0)</code> trunk markers and <code>ext</code>/<code>extension</code>/<code>x</code> suffixes), 12–19 digit contiguous or grouped account/card numbers, and NANP phones in one combined pass. Any pre-existing <code>&lt;EMAIL_n&gt;</code> / <code>&lt;PHONE_n&gt;</code> text already present in untrusted input is captured by the <code>literal</code> branch and mapped to <code>&lt;LITERAL_n&gt;</code> so untrusted senders cannot forge or probe session tokens.</li>
-        <li><strong>Single-pass restoration immune to second-pass expansion:</strong> Rather than looping <code>replaceAll</code> sequentially over token entries, <code>restore()</code> runs a single callback pass over <code>RESTORE_TOKEN_RE</code>. If an original redacted string itself contained literal <code>&lt;PHONE_1&gt;</code> text, restoring an outer token never triggers a second substitution pass or <code>$&amp;</code> replacement-string expansion.</li>
+        <li><strong>Single-pass tokenization &amp; precision boundaries (lines 28–45, 53–57, 94–110):</strong> <code>redact()</code> matches standard and quoted ASCII RFC 5321 emails, hyphen/space/en-dash US SSNs (excluding unassigned SSA prefixes <code>000</code>, <code>666</code>, <code>900–999</code>, group <code>00</code>, and serial <code>0000</code>), <code>+</code>-prefixed ITU-T E.164/E.123 international phones (7–15 digits verified in <code>isValidIntlPhone</code>, with optional <code>(0)</code> trunk markers and <code>ext</code>/<code>ext.</code>/<code>extension</code>/<code>x</code> suffixes such as <code>+44 20 7946 0958 ext. 12</code>), 12–19 digit contiguous or <code>4-4-4-1..7</code> / <code>4-4-4-4-1..3</code> / <code>4-6-5</code> space/hyphen/dot-grouped card/account numbers, and 10/11-digit NANP phones—while bounding away ISO dates (<code>2026-11-16</code>), 4-part dotted software versions (<code>1.314.555.0199</code>), ISBNs, and currency amounts (<code>$1,234,567,890,123.45</code>). Pre-existing token-shaped strings are isolated as <code>&lt;LITERAL_n_nonce&gt;</code>; pass <code>{ deterministic: true }</code> only when bare <code>&lt;EMAIL_1&gt;</code> tokens without a random nonce are explicitly required.</li>
+        <li><strong>Single-pass restoration (lines 112–118):</strong> <code>restore()</code> runs a single callback pass over <code>RESTORE_TOKEN_RE</code>, replacing only tokens present in that session's <code>tokenToValue</code> map so literal token text inside an original value never undergoes second-pass substitution.</li>
       </ul>
 
       <h2 id="limitations">5. Scope &amp; Known Limitations</h2>
       <p>
-        <code>inbox-guard</code> is a pre-triage screening layer; its exact threat boundaries are documented here and in <a href="https://github.com/KilianTheMagnificent/inbox-guard#scope--known-limitations"><code>inbox-guard/README.md</code></a>:
+        <code>inbox-guard</code> is a pre-triage screening layer; its exact boundaries match <a href="https://github.com/KilianTheMagnificent/inbox-guard#scope--known-limitations"><code>inbox-guard/README.md</code></a>:
       </p>
       <ul>
-        <li><strong>Regex PII scope vs. unstructured entities (<code>src/redact.mjs</code>):</strong> Tokenization is pattern-based. It does not detect free-text person or company names, street addresses, alphanumeric IBANs, unhyphenated 9-digit SSNs (omitted to avoid false positives on 9-digit routing and PO numbers), or domestic non-NANP phone numbers written without a leading <code>+</code> country code. Mappings exist only in local process memory for one session.</li>
-        <li><strong>Leading magic bytes vs. deep container / polyglot inspection (<code>src/attachment.mjs</code>):</strong> <code>checkAttachment</code> checks filenames and leading header bytes at offset 0. It does not unpack archives, run antivirus signatures, detect polyglot payloads appended after a valid <code>%PDF-</code> header, or parse internal PDF object streams (e.g., <code>/JavaScript</code> or <code>/OpenAction</code> dictionaries) or OOXML zip members for external template injection. Archive formats are flagged <code>UNINSPECTED_ARCHIVE_CONTAINER</code> so callers unpack and inspect inner files inside an isolated sandbox.</li>
-        <li><strong>Static HTML/header screening vs. mail-gateway auth &amp; semantic prompt injection (<code>src/email.mjs</code>):</strong> <code>inspectInboundEmail</code> inspects RFC 5322 header strings and static HTML/CSS hiding rules; cryptographic sender authentication (<code>SPF</code>, <code>DKIM</code>, <code>DMARC</code>) must still be enforced by the receiving mail gateway, and full CSS cascade / foreground-matching-background contrast across nested tables is not rendered. Similarly, <code>INSTRUCTION_OVERRIDE_PATTERN</code> rules are static phrase heuristics that an attacker can paraphrase in plain visible prose—never a substitute for privilege separation, tool allowlists, and mandatory human approval before outbound sends or financial actions (see <a href="https://meetkestrel.com/security">Kestrel's security design</a>).</li>
-        <li><strong>Parsed 2D arrays vs. raw CSV streams (<code>src/csv.mjs</code>):</strong> <code>sanitizeCsvRows</code> expects already-parsed 2D cell arrays from an RFC-4180 parser, and prefixing dangerous cells with <code>'</code> leaves a visible leading apostrophe when read by non-spreadsheet tools.</li>
+        <li><strong>Pattern-only PII redaction (<code>src/redact.mjs</code>):</strong> Tokenization is strictly regex-based. It does not detect unstructured person or company names, street addresses, non-ASCII UTF-8/IDN email addresses (<code>josé@example.com</code>, <code>user@bücher.de</code>) unless converted to ASCII/Punycode upstream, alphanumeric IBANs, 8–11 digit domestic bank account numbers or contiguous 9-digit SSNs/ABA routing numbers (excluded to avoid false positives on order and invoice IDs; conversely, bare 12–19 digit integers such as 13-digit millisecond Unix timestamps are tokenized as <code>&lt;ACCOUNT&gt;</code>), or domestic non-NANP phone numbers written without a <code>+</code> country code. Token mappings exist only in in-process memory.</li>
+        <li><strong>Leading-header attachment checks (<code>src/attachment.mjs</code>):</strong> <code>checkAttachment</code> inspects filenames and leading magic bytes at byte offset 0. It does not parse full container structures, unpack archives, run antivirus signatures, detect polyglot payloads appended after a valid <code>%PDF-</code> header, or inspect structurally valid PDF streams for <code>/JavaScript</code> / <code>/OpenAction</code> dictionaries or OOXML <code>.docx</code>/<code>.xlsx</code> packages for external template relationships. Archive extensions are flagged <code>UNINSPECTED_ARCHIVE_CONTAINER</code>, and legacy binary Office extensions (<code>.doc</code>, <code>.xls</code>, <code>.ppt</code>) are blocked outright because macro streams inside OLE2 containers cannot be ruled out from header bytes alone.</li>
+        <li><strong>Static header &amp; HTML email screening (<code>src/email.mjs</code>):</strong> <code>inspectInboundEmail</code> checks RFC 5322 <code>From</code>/<code>Reply-To</code> headers and static HTML/CSS hiding constructs, not cryptographic sender authentication (<code>SPF</code>, <code>DKIM</code>, and <code>DMARC</code> must be verified by the receiving mail gateway) or full browser cascade inheritance across separate ancestor/descendant rules (for example, <code>color:white</code> on a child element whose white background is inherited from an outer table cell, or <code>Reply-To</code> across authorized parent/child subdomains such as <code>mail.vendor.example</code> vs. <code>vendor.example</code>, which still raises a <code>medium</code>-severity domain-mismatch signal for caller review). <code>INSTRUCTION_OVERRIDE_PATTERN</code> rules are static phrase heuristics that an adaptive attacker can paraphrase; never rely on them in place of privilege separation, tool allowlists, and mandatory human approval before external sends or financial actions.</li>
+        <li><strong>Parsed CSV cell arrays (<code>src/csv.mjs</code>):</strong> <code>sanitizeCsvRows</code> expects already-parsed 2D cell arrays (<code>string[][]</code>), not raw CSV byte streams. Parse raw CSV files with an RFC-4180 parser before sanitization and emit rows via <code>serializeCsvRow</code>; prefixing dangerous cells with <code>'</code> leaves a literal leading apostrophe when read by non-spreadsheet consumers.</li>
       </ul>
 
       <div class="callout">
         <strong>Verification &amp; Vulnerability Reporting</strong>
-        Tested via Node's built-in runner (<code>npm test</code>, including 50k-character linear-time anti-ReDoS checks) and GitHub CodeQL scanning. Report bypasses privately via <a href="https://github.com/KilianTheMagnificent/inbox-guard/security/advisories/new">GitHub Private Vulnerability Reporting</a> (<a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/main/SECURITY.md"><code>SECURITY.md</code></a>).
+        Tested via Node's built-in runner (<code>npm test</code>, including 200 KB linear-time anti-ReDoS timing checks) and GitHub CodeQL scanning. Report bypasses privately via <a href="https://github.com/KilianTheMagnificent/inbox-guard/security/advisories/new">GitHub Private Vulnerability Reporting</a> (<a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/main/SECURITY.md"><code>SECURITY.md</code></a>).
       </div>
     </article>
 

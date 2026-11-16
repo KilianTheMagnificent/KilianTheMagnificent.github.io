@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Andre Romero-Carey — Security &amp; Verification Notes</title>
-  <meta name="description" content="Technical notes by Andre Romero-Carey on Lean 4 proof-checker soundness testing, formal specification audits, and input screening before LLM triage.">
+  <meta name="description" content="Technical notes by Andre Romero-Carey on input-validation libraries and machine-checked Lean 4 verification.">
   <meta name="author" content="Andre Romero-Carey">
   <link rel="canonical" href="https://kilianthemagnificent.github.io/">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2318181b'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='700' fill='%23fcfcfa' text-anchor='middle'%3EAR%3C/text%3E%3C/svg%3E">
@@ -25,21 +25,19 @@
 
     <main>
       <h1>Andre Romero-Carey — Security &amp; Verification Notes</h1>
-      <p class="subtitle">Software Developer &amp; Co-Founder (<a href="https://meetkestrel.com">Kestrel</a>, pre-launch) · St. Louis, MO</p>
+      <p class="subtitle">Software Developer · St. Louis, MO</p>
 
       <div class="meta-links">
         <a href="https://github.com/KilianTheMagnificent">github.com/KilianTheMagnificent</a>
         <span class="sep" aria-hidden="true">·</span>
         <a href="https://www.linkedin.com/in/andre-romerocarey">linkedin.com/in/andre-romerocarey</a>
-        <span class="sep" aria-hidden="true">·</span>
-        <a href="https://meetkestrel.com/security">Kestrel Security Design</a>
       </div>
 
       <p>
-        I build Lean 4 proof-checking pipelines, input-screening libraries, and human-in-the-loop back-office software. Most of the notes here examine what breaks when untrusted files, inbound mail, or AI-authored code cross into compilers, spreadsheets, or external model APIs without an explicit check in front of them.
+        Software developer working on input-validation libraries and machine-checked Lean 4 verification. The notes here examine what breaks when untrusted files, inbound mail, CSV exports, or AI-generated proof scripts pass into compilers, spreadsheets, or external model APIs without explicit validation in front of them.
       </p>
       <p>
-        All adversarial test cases referenced below—checker bypass modules, disguised binary headers, CSV formula strings, and hidden HTML/Unicode markers—are synthetic regression fixtures run locally against my own code.
+        All adversarial test cases referenced below—checker tamper/bypass modules, disguised binary headers, CSV formula strings, and hidden HTML/Unicode markers—are synthetic local regression fixtures run against my own repositories.
       </p>
 
       <h2 id="notes">Research Notes</h2>
@@ -48,11 +46,11 @@
           <div class="note-card-meta">
             <span>2026-11-16 (covers #7590 filed 2026-10-24)</span>
             <span class="badge">Lean 4</span>
-            <span class="badge">Verifier Soundness</span>
+            <span class="badge">Proof Checking</span>
           </div>
           <h3><a href="notes/lean4-verifier-adversarial-suite.html">Checking Untrusted AI-Authored Lean 4 Proofs</a></h3>
           <p>
-            Why <code>lake build</code> plus a <code>sorry</code> grep fails when unattended agents write Lean proofs. Walks through the 5-layer checker in <code>open-proofs</code> (<code>integrity</code>, <code>lint</code>, clean <code>build</code>, <code>opcheck</code>, <code>leanchecker</code>), the 48 self-test expectations in <code>tests/run_adversarial.py</code> (<code>@[extern]</code>, <code>@[implemented_by]</code>, <code>native_decide</code>, axiom smuggling, definition/instance shadowing, and <code>debug.skipKernelTC</code>), scope limits of the checker, and the negation proofs behind <code>google-deepmind/formal-conjectures#7590</code>.
+            Why <code>lake build</code> plus a <code>sorry</code> grep fails when unattended coding agents write Lean proofs. Walks through <code>open-proofs</code> (where proofs and tooling were built with Claude Code and Codex and verified by a 5-layer checker: <code>integrity</code>, <code>lint</code>, clean <code>build</code>, <code>opcheck</code>, <code>leanchecker</code>), the 48 self-test checks in <code>tests/run_adversarial.py</code> (41 negative tamper/bypass checks plus 7 positive controls), checker scope limits, and the negation proofs behind <code>google-deepmind/formal-conjectures#7590</code>.
           </p>
         </li>
 
@@ -64,27 +62,27 @@
           </div>
           <h3><a href="notes/untrusted-office-input-defenses.html">Screening Untrusted Office Inputs Before LLM Triage</a></h3>
           <p>
-            Design and known limits of <code>inbox-guard</code>, a zero-dependency Node.js library that screens inbound business emails, attachments, and CSV exports before model calls or human review. Covers leading magic-byte checks (<code>MZ</code>/<code>ELF</code>/<code>Mach-O</code> renamed to <code>.pdf</code>), Unicode <code>U+202E</code> and Windows/SMB filename spoofing, accounting-safe OWASP CSV neutralization and RFC-4180 serialization, Plane-14 Unicode Tag (<code>U+E0000..U+E007F</code>) &amp; entity-decoded CSS-hidden text detection, <code>From</code> display-name spoofing, and single-pass session-scoped PII tokenization.
+            Design and known limits of <code>inbox-guard</code>, a zero-dependency Node.js library that screens inbound business emails, attachments, and CSV exports before model calls or human review. Covers leading magic-byte checks (<code>MZ</code>/<code>ELF</code>/<code>Mach-O</code>/archives renamed to document extensions), Unicode <code>U+202E</code> and Windows/SMB filename spoofing, accounting-safe OWASP CSV neutralization and RFC-4180 serialization, linear HTML5 comment and CSS declaration scanning, Plane-14 Unicode Tag (<code>U+E0000..U+E007F</code>) stripping, RFC 5322 sender spoofing, and randomized session-scoped PII tokenization.
           </p>
         </li>
       </ul>
 
-      <h2 id="disclosures">Upstream Reports</h2>
+      <h2 id="disclosures">Upstream Issues</h2>
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
               <th>Date</th>
-              <th>Issue</th>
+              <th>Issue &amp; Status</th>
               <th>Details</th>
             </tr>
           </thead>
           <tbody>
             <tr>
               <td>2026-10-24</td>
-              <td><a href="https://github.com/google-deepmind/formal-conjectures/issues/7590"><code>google-deepmind/formal-conjectures#7590</code></a></td>
+              <td><a href="https://github.com/google-deepmind/formal-conjectures/issues/7590"><code>google-deepmind/formal-conjectures#7590</code></a><br><small>(open, 0 comments)</small></td>
               <td>
-                Reported 8 open value-question theorems across 7 files (Erdős 142, 319, 321, 361, 409 <code>sigma</code>, 503, and 692 <code>parts.ii</code>) whose <code>answer</code> placeholder omits a parameter the theorem quantifies over (<code>k</code>, <code>N</code>, <code>c</code>, or <code>n</code>), making each statement false for every value of the placeholder. Backed by kernel-checked Lean 4 negation proofs using only <code>propext</code>, <code>Classical.choice</code>, and <code>Quot.sound</code>.
+                Applied a missing-quantified-parameter pattern earlier contributors had reported (<code>#7327</code>, <code>#7434</code>, <code>#7493</code>) to 8 remaining open value-question declarations across 7 Erdős problems (<code>142</code> [2 declarations], <code>319</code>, <code>321</code>, <code>361</code>, <code>409</code> <code>variants.sigma</code>, <code>503</code>, and <code>692</code> <code>parts.ii</code>) whose <code>answer</code> placeholder omitted a quantified parameter (<code>k</code>, <code>N</code>, <code>c</code>, or <code>n</code>), making each formal statement false for every value of the placeholder. Backed by kernel-checked Lean 4 negation proofs (built with Claude Code, disclosed in the issue) using only <code>propext</code>, <code>Classical.choice</code>, and <code>Quot.sound</code>. Separate upstream PRs later parameterized 4 of the 8 declarations independently (<code>#7946</code>, <code>#8015</code>); the other 4 remain unchanged on <code>main</code>.
               </td>
             </tr>
           </tbody>
@@ -95,15 +93,11 @@
       <ul>
         <li>
           <strong><a href="https://github.com/KilianTheMagnificent/open-proofs"><code>KilianTheMagnificent/open-proofs</code></a></strong> —
-          5-layer Lean 4 proof checker (<code>scripts/check.py</code>, <code>scripts/lint.py</code>, <code>OpenProofsChecker/Main.lean</code>), <a href="https://github.com/KilianTheMagnificent/open-proofs/blob/main/tests/run_adversarial.py">48-case adversarial self-test suite</a>, 131 proved targets (textbook, test, and solved research statements; no open problems solved), and <a href="https://github.com/KilianTheMagnificent/open-proofs/tree/main/outbox">11 misformalization certificates</a> on <code>google-deepmind/formal-conjectures</code>.
+          Lean 4 proofs and 5-layer proof checker built with Claude Code and Codex (<code>scripts/check.py</code>, <code>scripts/lint.py</code>, <code>OpenProofsChecker/Main.lean</code>): <a href="https://github.com/KilianTheMagnificent/open-proofs/blob/main/tests/run_adversarial.py">48 self-test checks</a> (41 negative tamper/bypass checks plus 7 positive controls), 131 verified proofs of textbook/test/solved statements (no open mathematical problems solved), and 11 negation certificates across 9 Erdős problems with unfiled local draft notes in <a href="https://github.com/KilianTheMagnificent/open-proofs/tree/main/outbox"><code>outbox/</code></a> and 1 filed upstream issue (<a href="https://github.com/google-deepmind/formal-conjectures/issues/7590"><code>#7590</code></a>, open with 0 comments, covering 8 declarations across 7 Erdős problems).
         </li>
         <li>
           <strong><a href="https://github.com/KilianTheMagnificent/inbox-guard"><code>KilianTheMagnificent/inbox-guard</code></a></strong> —
-          Zero-dependency Node.js attachment, CSV, and inbound-email screening plus session-scoped regex PII tokenization, tested with <code>node:test</code> and CodeQL (<a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/main/SECURITY.md"><code>SECURITY.md</code></a>).
-        </li>
-        <li>
-          <strong><a href="https://github.com/KilianTheMagnificent/flowclone-updates"><code>KilianTheMagnificent/flowclone-updates</code></a></strong> —
-          Code-signed macOS release channel for FlowClone, a local-first macOS voice dictation app.
+          Zero-dependency Node.js attachment, CSV, and inbound-email screening plus randomized session-scoped PII tokenization, tested with <code>node:test</code> and CodeQL (<a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/main/SECURITY.md"><code>SECURITY.md</code></a>).
         </li>
       </ul>
     </main>

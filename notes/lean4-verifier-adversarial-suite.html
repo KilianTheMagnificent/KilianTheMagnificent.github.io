@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Checking Untrusted AI-Authored Lean 4 Proofs — Andre Romero-Carey</title>
-  <meta name="description" content="5-layer Lean 4 proof checker in open-proofs, its 48-case adversarial test suite, scope limits, and machine-checked negation proofs for google-deepmind/formal-conjectures#7590.">
+  <meta name="description" content="5-layer Lean 4 proof checker in open-proofs, its 48 self-test checks (41 negative tamper/bypass checks plus 7 positive controls), scope limits, and machine-checked negation proofs for google-deepmind/formal-conjectures#7590.">
   <meta name="author" content="Andre Romero-Carey">
   <link rel="canonical" href="https://kilianthemagnificent.github.io/notes/lean4-verifier-adversarial-suite.html">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2318181b'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='700' fill='%23fcfcfa' text-anchor='middle'%3EAR%3C/text%3E%3C/svg%3E">
@@ -24,11 +24,11 @@
 
     <article>
       <div class="article-meta">
-        Published 2026-11-16 · Covers upstream report <a href="https://github.com/google-deepmind/formal-conjectures/issues/7590">#7590</a> filed 2026-10-24 · Repo: <a href="https://github.com/KilianTheMagnificent/open-proofs"><code>KilianTheMagnificent/open-proofs</code></a> · Toolchain: <code>leanprover/lean4:v4.33.1</code>
+        Published 2026-11-16 · Covers upstream issue <a href="https://github.com/google-deepmind/formal-conjectures/issues/7590">#7590</a> (filed 2026-10-24, open) · Repo: <a href="https://github.com/KilianTheMagnificent/open-proofs"><code>KilianTheMagnificent/open-proofs</code></a> · Toolchain: <code>leanprover/lean4:v4.33.1</code>
       </div>
       <h1>Checking Untrusted AI-Authored Lean 4 Proofs</h1>
       <p class="article-lede">
-        In <code>open-proofs</code>, AI agents (Claude Code and Codex) write Lean 4 proofs of placeholder declarations from <code>google-deepmind/formal-conjectures</code>, and no human reads the proof scripts line by line. Trust rests entirely on the checker. This note documents how a naive <code>lake build</code> check can be cheated, how the 5-layer checker and its 48-case adversarial suite close those paths, what the checker still does not guarantee, and how automated negation proofs surfaced the misformalizations reported in <a href="https://github.com/google-deepmind/formal-conjectures/issues/7590"><code>formal-conjectures#7590</code></a>.
+        In <code>open-proofs</code>, both the Lean 4 proof scripts and the repository tooling were built with AI coding agents (Claude Code and Codex), and no human reviews the proof scripts line by line. Acceptance rests on the 5-layer checker and the Lean kernel. This note documents how a naive <code>lake build</code> check can be bypassed, how the 5-layer checker and its 48 self-test checks (41 negative tamper/bypass checks plus 7 positive controls) test those paths, what the checker still does not guarantee, and how machine-checked negation proofs applied an existing missing-parameter pattern reported by earlier contributors to verify the eight declarations filed in <a href="https://github.com/google-deepmind/formal-conjectures/issues/7590"><code>formal-conjectures#7590</code></a>.
       </p>
 
       <nav class="toc" aria-label="Table of contents">
@@ -36,8 +36,8 @@
         <ol>
           <li><a href="#problem">Why <code>lake build</code> + Grepping for <code>sorry</code> Fails</a></li>
           <li><a href="#five-layers">The Five Checker Layers</a></li>
-          <li><a href="#adversarial-suite">The 48 Adversarial Self-Tests</a></li>
-          <li><a href="#misformalizations">Upstream Misformalizations Found via Negation Proofs (#7590)</a></li>
+          <li><a href="#adversarial-suite">The 48 Self-Test Checks (41 Negative + 7 Positive Controls)</a></li>
+          <li><a href="#misformalizations">Negation Proofs for Missing-Parameter Value Questions (#7590)</a></li>
           <li><a href="#limitations">Scope &amp; Known Limitations</a></li>
           <li><a href="#reproduce">Reproduce</a></li>
         </ol>
@@ -45,13 +45,13 @@
 
       <h2 id="problem" class="no-rule">1. Why <code>lake build</code> + Grepping for <code>sorry</code> Fails</h2>
       <p>
-        Lean's kernel checks elaborated proof terms, not surface source files or build scripts. When an unattended agent has write access to a workspace and is told to prove a theorem, a script that compiles with <code>lake build</code> and contains no literal <code>sorry</code> token can still fail to prove the intended theorem in at least five ways:
+        Lean's kernel checks elaborated proof terms, not surface source files or build scripts. When an unattended coding agent has write access to a workspace and is instructed to prove a theorem, a file that compiles with <code>lake build</code> and contains no literal <code>sorry</code> token can still fail to prove the intended theorem in at least five ways:
       </p>
       <ul>
-        <li><strong>Statement drift or shadowing:</strong> Adding an extra hypothesis (<code>h : k &lt; 0</code> on <code>k : ℕ</code>), defining a local <code>Erdos349.IsGoodPair</code> inside a nested namespace so the text matches upstream while resolving to <code>True</code>, or declaring a high-priority local <code>instance : LE ℕ</code> where <code>≤</code> means <code>True</code>.</li>
+        <li><strong>Statement drift or shadowing:</strong> Adding a vacuous extra hypothesis (<code>h : k &lt; 0</code> on <code>k : ℕ</code>), defining a local <code>Erdos349.IsGoodPair</code> inside a nested namespace so the surface text matches upstream while resolving to <code>True</code>, or declaring a high-priority local <code>instance (priority := high) cheatLE : LE ℕ</code> where <code>≤</code> resolves to <code>True</code>.</li>
         <li><strong>Transitive placeholder laundering:</strong> Proving the candidate theorem by applying the upstream theorem directly—whose own body in <code>formal-conjectures</code> is still <code>sorry</code>—or hiding <code>sorry</code> behind a tactic macro or helper module.</li>
-        <li><strong>Compiler-trust attributes and tactics:</strong> Using <code>native_decide</code> (which introduces <code>Lean.ofReduceBool</code> / <code>Lean.trustCompiler</code>), <code>@[extern]</code>, or <code>@[implemented_by]</code> so compiled code diverges from kernel reduction.</li>
-        <li><strong>Elaboration-time environment mutation:</strong> Running <code>set_option debug.skipKernelTC true</code> with <code>run_cmd</code> and <code>addDecl</code> to insert a proof of <code>False</code> backed by <code>True.intro</code>. No axiom appears anywhere in the resulting constant's body.</li>
+        <li><strong>Compiler-trust attributes and tactics:</strong> Using <code>native_decide</code> (which introduces <code>Lean.ofReduceBool</code> / <code>Lean.trustCompiler</code>), <code>@[extern]</code>, or <code>@[implemented_by]</code> so compiled execution diverges from kernel reduction.</li>
+        <li><strong>Elaboration-time environment mutation:</strong> Running <code>set_option debug.skipKernelTC true</code> with <code>run_cmd</code> and <code>addDecl</code> to insert a theorem of type <code>False</code> backed by <code>True.intro</code>. No axiom appears in the resulting constant's body.</li>
         <li><strong>Workspace tampering:</strong> Editing files inside <code>.lake/packages/formal_conjectures</code>, adding <code>moreLeanArgs = ["-Ddebug.skipKernelTC=true"]</code> to <code>lakefile.toml</code>, or leaving a stale <code>.olean</code> from an earlier build.</li>
       </ul>
 
@@ -60,49 +60,51 @@
         <a href="https://github.com/KilianTheMagnificent/open-proofs/blob/main/scripts/check.py"><code>scripts/check.py</code></a> (<code>check_claim</code>, lines 259–297) passes a claim only when all five layers pass. Every recorded verdict in <code>ledger/results.json</code> includes the SHA-256 hash of the checker files themselves (<code>TRUSTED_BASE</code>, lines 50–58 and 146–154).
       </p>
 
-      <h3>Layer 1 — <code>integrity</code> (<code>scripts/check.py</code>, lines 91–144)</h3>
+      <h3>Layer 1 — <code>integrity</code> (<code>scripts/check.py</code>, lines 91–143)</h3>
       <p>
-        Checks workspace pins before touching candidate code:
+        Checks workspace pins before inspecting candidate code:
       </p>
       <ul>
         <li>Verifies <code>lean-toolchain</code> matches <code>upstream.json</code> (<code>leanprover/lean4:v4.33.1</code>), and that <code>lakefile.toml</code> and <code>lake-manifest.json</code> match the pinned commits for <code>formal_conjectures</code> (<code>96343eeb5990ff13735e728cd0195eff0156a3bb</code>) and <code>mathlib</code> (<code>0df444a360eaa60ab8c11dca51a86af692955474</code>).</li>
-        <li>Rejects <code>lakefile.lean</code> outright (Lean lakefiles execute arbitrary code during configuration) and scans <code>lakefile.toml</code> against 15 forbidden keys (<code>FORBIDDEN_LAKEFILE_KEYS</code>: <code>moreLeanArgs</code>, <code>weakLeanArgs</code>, <code>moreServerArgs</code>, <code>plugins</code>, <code>dynlibs</code>, <code>loadDynlibPaths</code>, <code>precompileModules</code>, <code>nativeFacets</code>, etc.) plus regexes for <code>debug.</code>, <code>skipKernelTC</code>, <code>trustLevel</code>, and <code>\btrust\b</code>.</li>
+        <li>Rejects <code>lakefile.lean</code> outright (Lean lakefiles can run arbitrary code during configuration) and scans <code>lakefile.toml</code> against 15 forbidden keys (<code>FORBIDDEN_LAKEFILE_KEYS</code>: <code>moreLeanArgs</code>, <code>weakLeanArgs</code>, <code>moreServerArgs</code>, <code>moreServerOptions</code>, <code>moreGlobalServerArgs</code>, <code>plugins</code>, <code>dynlibs</code>, <code>loadDynlibPaths</code>, <code>precompileModules</code>, <code>moreLinkArgs</code>, <code>moreLinkObjs</code>, <code>extraDepTargets</code>, <code>moreLeancArgs</code>, <code>weakLeancArgs</code>, <code>nativeFacets</code>) plus regexes for <code>debug\.</code>, <code>skipKernelTC</code>, <code>trustLevel</code>, and <code>\btrust\b</code>.</li>
         <li>Runs <code>git rev-parse HEAD</code> and <code>git status --porcelain --untracked-files=all</code> inside every checkout under <code>.lake/packages/</code>, rejecting both tracked edits and untracked files.</li>
       </ul>
 
-      <h3>Layer 2 — <code>lint</code> (<code>scripts/lint.py</code>, lines 23–215)</h3>
+      <h3>Layer 2 — <code>lint</code> (<code>scripts/lint.py</code>, lines 23–214)</h3>
       <p>
         Walks the <code>OpenProofs.*</code> source import closure (<code>source_closure</code>, lines 221–237) and applies role-specific source rules before any Lean build runs:
       </p>
       <ul>
-        <li><strong>Stripped pass (<code>RESULT_CODE_RULES</code>, 29 rules):</strong> <code>strip_comments_and_strings</code> (lines 98–145) blanks line comments, nested <code>/- ... -/</code> block comments, string literals, and character literals while keeping line numbers intact, then bans <code>sorry</code>, <code>admit</code>, <code>stop</code>, <code>axiom</code>, <code>opaque</code>, <code>unsafe</code>, <code>partial</code>, <code>implemented_by</code>, <code>extern</code>, <code>export</code>, <code>csimp</code>, <code>@[init]</code>, <code>native_decide</code>, <code>+native</code>, <code>ofReduceBool</code>/<code>reduceBool</code>/<code>trustCompiler</code>, <code>macro</code>/<code>syntax</code>/<code>elab</code>/<code>notation</code>, <code>run_cmd</code>/<code>run_elab</code>/<code>run_meta</code>/<code>run_tac</code>, <code>#eval</code>/<code>#exit</code>, <code>initialize</code>, <code>debug.*</code>, <code>skipKernelTC</code>, <code>set_option trust</code>, <code>addDecl*</code>/<code>modifyEnv</code>/<code>setEnv</code>, and <code>Lean.(Elab|Meta|Kernel|Compiler|Parser|PrettyPrinter)</code>.</li>
-        <li><strong>Raw text pass (<code>RAW_RULES</code>, 9 rules):</strong> Scans the unstripped source text for <code>sorry</code>, <code>admit</code>, <code>native_decide</code>, <code>implemented_by</code>, <code>skipKernelTC</code>, <code>ofReduceBool</code>/<code>trustCompiler</code>, <code>run_cmd</code>/<code>run_tac</code>/<code>run_elab</code>/<code>run_meta</code>, <code>#eval</code>, and <code>addDecl*</code>. Result files may not write those words even inside comments or strings, making comment/string parser edge cases irrelevant for them.</li>
-        <li><strong>Import allowlists &amp; statement files:</strong> Proof files may import only <code>Mathlib</code>, <code>Batteries</code>, <code>Aesop</code>, <code>Plausible</code>, <code>FormalConjectures*</code>, and <code>OpenProofs.{Results,Lib}.*</code>. Self-recorded variant statements in <code>OpenProofs/Statements/</code> may contain only <code>theorem ... := sorry</code> declarations—no <code>def</code>, <code>abbrev</code>, <code>instance</code>, <code>structure</code>, <code>notation</code>, or <code>variable</code> (<code>STATEMENT_FORBIDDEN_DECL</code>, lines 78–84).</li>
+        <li><strong>Stripped pass (<code>RESULT_CODE_RULES</code>, 29 rules, lines 23–53):</strong> <code>strip_comments_and_strings</code> (lines 98–145) blanks line comments, nested <code>/- ... -/</code> block comments, string literals, and character literals while keeping line numbers intact, then bans <code>sorry</code>, <code>admit</code>, <code>stop</code>, <code>axiom</code>, <code>opaque</code>, <code>unsafe</code>, <code>partial</code>, <code>implemented_by</code>, <code>extern</code>, <code>export</code>, <code>csimp</code>, <code>@[init]</code>, <code>native_decide</code>, <code>+native</code>, <code>ofReduceBool</code>/<code>reduceBool</code>/<code>trustCompiler</code>, <code>macro</code>/<code>macro_rules</code>, <code>syntax</code>/<code>declare_syntax_cat</code>, <code>elab</code>/<code>elab_rules</code>, <code>notation</code>/<code>infix*</code>/<code>prefix</code>/<code>postfix</code>, <code>run_cmd</code>/<code>run_elab</code>/<code>run_meta</code>/<code>run_tac</code>, <code>#eval</code>/<code>#exit</code>/<code>#guard_msgs</code>, <code>initialize</code>/<code>builtin_initialize</code>, <code>debug.*</code>, <code>skipKernelTC</code>, <code>set_option trust</code>, <code>addDecl*</code>/<code>modifyEnv</code>/<code>setEnv</code>/<code>Environment</code>, <code>Lean.(Elab|Meta|Kernel|Compiler|Parser|PrettyPrinter)</code>, <code>meta</code>, and <code>module</code> headers.</li>
+        <li><strong>Raw text pass (<code>RAW_RULES</code>, 9 rules, lines 57–67):</strong> Scans the unstripped source text for <code>sorry</code>, <code>admit</code>, <code>native_decide</code>, <code>implemented_by</code>, <code>skipKernelTC</code>, <code>ofReduceBool</code>/<code>trustCompiler</code>, <code>run_cmd</code>/<code>run_tac</code>/<code>run_elab</code>/<code>run_meta</code>, <code>#eval</code>, and <code>addDecl*</code>. Result files may not contain those tokens even inside comments or strings, so lexer edge cases cannot hide them.</li>
+        <li><strong>Import allowlists &amp; statement files:</strong> Result files may import only <code>Mathlib</code>, <code>Batteries</code>, <code>Aesop</code>, <code>Plausible</code>, <code>FormalConjectures*</code>, and <code>OpenProofs.{Results,Lib}.*</code> (lines 69–72). Self-recorded variant statements in <code>OpenProofs/Statements/</code> may import only <code>Mathlib</code> and <code>FormalConjectures*</code> and may contain only <code>theorem ... := sorry</code> (or <code>:= by sorry</code>) declarations—rejecting <code>def</code>, <code>abbrev</code>, <code>instance</code>, <code>structure</code>, <code>lemma</code>, <code>notation</code>, <code>variable</code>, and other non-theorem declarations (<code>STATEMENT_FORBIDDEN_DECL</code>, lines 78–84).</li>
       </ul>
 
-      <h3>Layer 3 — Clean <code>build</code> (<code>scripts/check.py</code>, lines 183–199)</h3>
+      <h3>Layer 3 — Clean <code>build</code> (<code>scripts/check.py</code>, lines 183–198)</h3>
       <p>
-        <code>clean_outputs</code> deletes existing <code>.olean</code>, <code>.ilean</code>, and IR files under <code>.lake/build/lib/lean</code> and <code>.lake/build/ir</code> for all candidate modules in the source closure before running <code>lake build</code>, so compiled artifacts always match current source.
+        <code>clean_outputs</code> deletes existing <code>.olean</code>, <code>.ilean</code>, and IR files under <code>.lake/build/lib/lean</code> and <code>.lake/build/ir</code> for all candidate modules in the source closure before running <code>lake build</code>, ensuring compiled artifacts match current source.
       </p>
 
       <h3>Layer 4 — <code>opcheck</code> (<code>OpenProofsChecker/Main.lean</code>, lines 230–411)</h3>
       <p>
-        <code>opcheck</code> is a standalone Lean executable that inspects compiled <code>.olean</code> files without importing candidate modules at compile time. It loads the candidate module and reference module with extension hooks disabled (lines 246–249):
+        <code>opcheck</code> is a standalone Lean executable that inspects compiled <code>.olean</code> files at runtime without importing candidate modules at compile time. It loads the candidate module and reference module with extension hooks disabled (lines 246–249):
       </p>
-<pre><code>let env &lt;- importModules #[{ module := args.module }, { module := args.refModule }] {}
-  (trustLevel := 0) (loadExts := false) (level := .private)</code></pre>
+<pre><code>  let env ← try
+      importModules #[{ module := args.module }, { module := args.refModule }] {}
+        (trustLevel := 0) (loadExts := false) (level := .private)
+    catch e =&gt; return ← fail checks "load" s!"failed to import modules: {e}"</code></pre>
       <p>
-        With <code>loadExts := false</code> and <code>trustLevel := 0</code>, imported modules cannot execute <code>@[init]</code> blocks, environment-extension hooks, or pretty-printer extensions during inspection. <code>opcheck</code> emits nine check results:
+        With <code>trustLevel := 0</code> and <code>loadExts := false</code>, imported modules do not run <code>@[init]</code> procedures, environment-extension hooks, or pretty-printer extensions during inspection. <code>opcheck</code> evaluates nine checks:
       </p>
       <ol>
-        <li><code>module_origins</code> (lines 111–125, 251–259): Resolves <code>IO.FS.realPath</code> on every loaded <code>.olean</code> and classifies it into <code>core</code>, <code>package:&lt;name&gt;</code>, or <code>candidate</code>; fails on any unknown path.</li>
+        <li><code>module_origins</code> (lines 111–124, 251–259): Resolves <code>IO.FS.realPath</code> on every loaded <code>.olean</code> and classifies it into <code>core</code>, <code>package:&lt;name&gt;</code>, or <code>candidate</code>; fails on any unknown path.</li>
         <li><code>ref_trusted</code> (lines 264–276): Confirms the reference declaration is a <code>.thmInfo</code> defined in <code>.lake/packages/formal_conjectures</code> (<code>FormalConjectures.*</code>) for <code>upstream</code> claims, or <code>OpenProofs.Statements.*</code> for <code>variant</code> claims.</li>
         <li><code>theorem_found</code> (lines 278–286): Confirms the claimed theorem is a non-<code>unsafe</code> <code>.thmInfo</code> declared in the candidate module itself.</li>
-        <li><code>statement_match</code> (lines 292–314): Aligns universe parameters and compares <code>ci.type</code> against <code>refCi.type</code> as elaborated <code>Expr</code> values (<code>syntactic</code> identity). If they differ syntactically (for example, different typeclass instance paths that are definitionally equal), <code>opcheck</code> asks the kernel directly via <code>Kernel.Environment.addDecl</code> to typecheck <code>theorem _opcheck_statement_bridge : &lt;refCi.type&gt; := &lt;args.thm&gt;</code> (<code>kernel-defeq</code> identity).</li>
+        <li><code>statement_match</code> (lines 292–314): Aligns universe parameters and compares <code>ci.type</code> against <code>refCi.type</code> as elaborated <code>Expr</code> values (<code>syntactic</code> identity). If they differ syntactically (for instance, different typeclass instance paths that are definitionally equal), <code>opcheck</code> builds a synthetic <code>Declaration.thmDecl</code> named <code>_opcheck_statement_bridge</code> with type <code>refCi.type</code> and value <code>mkConst args.thm refLvls</code> and submits it to <code>Kernel.Environment.addDecl</code> (<code>kernel-defeq</code> identity).</li>
         <li><code>statement_consts</code> (lines 316–324): Verifies every constant in <code>refCi.type.getUsedConstants</code> comes from a trusted non-candidate module.</li>
-        <li><code>axioms</code> (lines 143–166, 326–337): Walks every constant body and type reachable from the theorem (<code>walkAxioms</code>) without reading precomputed <code>.olean</code> axiom metadata. Only <code>propext</code>, <code>Classical.choice</code>, and <code>Quot.sound</code> are allowed.</li>
+        <li><code>axioms</code> (lines 143–165, 326–337): Walks every constant body and type reachable from the theorem (<code>walkAxioms</code>) without reading precomputed <code>.olean</code> axiom metadata. Only <code>propext</code>, <code>Classical.choice</code>, and <code>Quot.sound</code> are allowed.</li>
         <li><code>closure_clean</code> (lines 339–346): Rejects candidate closures that import <code>OpenProofs.Statements.*</code> or <code>OpenProofsChecker.*</code>.</li>
-        <li><code>candidate_decls</code> (lines 348–396): Scans all constants across candidate modules in the closure (stripping private prefixes via <code>privateToUserName?</code>). Rejects <code>axiom</code>, <code>opaque</code>, <code>quot</code>, <code>unsafe</code>, <code>partial</code>, <code>@[implemented_by]</code>, <code>@[extern]</code>, <code>@[export]</code>, and <code>@[init]</code>. Enforces the <code>OpenProofs.</code> namespace—allowing outside it only compiler-realized equation theorems (<code>f.eq_&lt;digits&gt;</code>, <code>f.eq_def</code>, <code>f.eq_unfold</code>) of non-candidate definitions—and checks <code>properSuffixes</code> so no candidate declaration shadows a trusted definition, structure, or instance.</li>
+        <li><code>candidate_decls</code> (lines 347–396): Scans all constants across candidate modules in the closure (stripping private prefixes via <code>privateToUserName?</code>). Rejects <code>axiom</code>, <code>opaque</code>, <code>quot</code>, <code>unsafe</code>, <code>partial</code>, <code>@[implemented_by]</code>, <code>@[extern]</code>, <code>@[export]</code>, and <code>@[init]</code>. Enforces the <code>OpenProofs.</code> namespace—allowing outside it only compiler-realized equation theorems (<code>f.eq_&lt;digits&gt;</code>, <code>f.eq_def</code>, <code>f.eq_unfold</code>) of non-candidate definitions—and checks <code>properSuffixes</code> so no candidate declaration shadows a trusted definition, structure, or instance.</li>
         <li><code>kernel_replay</code> (lines 169–188, 398–408): Re-reads raw module data parts (<code>.olean</code>, <code>.olean.server</code>, <code>.olean.private</code>) and replays all candidate constants from scratch on top of clean imports via <code>env.replay</code>.</li>
       </ol>
 
@@ -111,12 +113,17 @@
         Runs <code>lake env leanchecker &lt;module&gt;</code> in a separate process for every candidate module in the closure.
       </p>
 
-      <h2 id="adversarial-suite">3. The 48 Adversarial Self-Tests</h2>
+      <h2 id="adversarial-suite">3. The 48 Self-Test Checks (41 Negative + 7 Positive Controls)</h2>
       <p>
-        <a href="https://github.com/KilianTheMagnificent/open-proofs/blob/main/tests/run_adversarial.py"><code>tests/run_adversarial.py</code></a> verifies 48 expectations across three groups: <strong>10 source-lint unit tests</strong> (<code>run_lint</code>), <strong>9 integrity tamper checks</strong> (<code>run_integrity</code>), and <strong>29 end-to-end Lean claims</strong> in <a href="https://github.com/KilianTheMagnificent/open-proofs/blob/main/tests/adversarial/cases.json"><code>tests/adversarial/cases.json</code></a> (25 cheat or hygiene-violation cases that must <code>FAIL</code>, plus 4 positive controls—<code>HonestFixture</code>, <code>HonestDecide</code>, <code>RealizedEqLemma</code>, and <code>LibGoodUse</code>—that must <code>PASS</code>).
+        <a href="https://github.com/KilianTheMagnificent/open-proofs/blob/main/tests/run_adversarial.py"><code>tests/run_adversarial.py</code></a> runs <strong>48 checks total: 41 negative tamper/bypass checks plus 7 positive control checks</strong> confirming that valid proofs, shared helper modules, and clean workspace configurations still pass. The 48 checks span three groups:
       </p>
+      <ul>
+        <li><strong>10 source-lint unit checks (<code>run_lint</code>):</strong> 8 negative checks testing comment/string/char-literal evasion, <code>csimp</code>, forbidden <code>Lean.Elab.Command</code> imports, and invalid statement files, plus 2 positive controls (<code>honest_result_clean</code>, <code>statement_clean</code>).</li>
+        <li><strong>9 workspace-integrity checks (<code>run_integrity</code>):</strong> 8 negative tamper checks (tracked edits and untracked files in <code>.lake/packages/formal_conjectures</code>, three <code>lakefile.toml</code> tamper injections, upstream commit pin mismatch, <code>lakefile.lean</code> injection, and toolchain mismatch), plus 1 positive control (<code>baseline_clean_passes</code>).</li>
+        <li><strong>29 end-to-end Lean claim checks (<code>run_lean</code>, <a href="https://github.com/KilianTheMagnificent/open-proofs/blob/main/tests/adversarial/cases.json"><code>tests/adversarial/cases.json</code></a>):</strong> 25 negative cheat or hygiene-violation cases that must <code>FAIL</code>, plus 4 positive controls (<code>HonestFixture</code>, <code>HonestDecide</code>, <code>RealizedEqLemma</code>, and <code>LibGoodUse</code>) that must <code>PASS</code>.</li>
+      </ul>
       <p>
-        Each entry in <code>cases.json</code> specifies both <code>must_fail</code> and optional <code>must_pass</code> checks so a change in one layer cannot silently mask a regression in another:
+        Entries in <code>cases.json</code> assert both <code>must_fail</code> and optional <code>must_pass</code> checks so a change in one layer cannot silently mask a regression in another:
       </p>
 
       <div class="table-wrap">
@@ -124,7 +131,7 @@
           <thead>
             <tr>
               <th>Category</th>
-              <th>Cases in <code>run_adversarial.py</code></th>
+              <th>Checks in <code>run_adversarial.py</code></th>
               <th>What Passes vs. What Rejects It</th>
             </tr>
           </thead>
@@ -137,12 +144,12 @@
             <tr>
               <td><strong>Axiom &amp; placeholder laundering</strong></td>
               <td><code>SorryDirect</code>, <code>MacroSorry</code>, <code>SorryViaUpstream</code>, <code>ImportsStatement</code>, <code>LibSorryUse</code>, <code>LibSorryUnused</code>, <code>CustomAxiom</code>, <code>AxiomClaim</code></td>
-              <td><code>SorryViaUpstream</code> cites the upstream placeholder theorem directly; it passes <code>lint</code> and <code>statement_match</code>, and is caught by <code>opcheck:axioms</code> walking into upstream's <code>sorryAx</code>. <code>LibSorryUnused</code> proves its theorem honestly with <code>decide</code> while importing a helper module containing <code>sorry</code>; <code>axioms</code> passes, <code>lint</code> rejects the closure.</td>
+              <td><code>SorryViaUpstream</code> cites the upstream placeholder theorem directly; it passes <code>lint</code> and <code>statement_match</code>, and is caught by <code>opcheck:axioms</code> walking into upstream's <code>sorryAx</code>. <code>LibSorryUnused</code> proves its theorem with <code>decide</code> while importing a helper module containing <code>sorry</code>; <code>axioms</code> passes, <code>lint</code> rejects the closure.</td>
             </tr>
             <tr>
-              <td><strong>Statement spoofing &amp; shadowing</strong></td>
-              <td><code>WeakenedStatement</code>, <code>ShadowDef</code>, <code>InstanceOverride</code>, <code>CandidateDef</code>, <code>FakeEqLemma</code>, <code>OutsideNamespace</code>, <code>UpstreamNamespaceHelper</code></td>
-              <td><code>ShadowDef</code> (redefining <code>Erdos349.IsGoodPair</code> as <code>True</code>) and <code>InstanceOverride</code> (high-priority <code>LE ℕ</code> returning <code>True</code>) pass <code>lint</code> and <code>axioms</code>, and fail <code>opcheck:statement_match</code> (plus <code>candidate_decls</code> for <code>ShadowDef</code>). <code>FakeEqLemma</code> forges <code>Erdos349.IsGoodPair.eq_helper</code> and fails <code>candidate_decls</code> while <code>RealizedEqLemma</code> (<code>eq_1</code>) passes.</td>
+              <td><strong>Statement spoofing, shadowing &amp; reference checks</strong></td>
+              <td><code>WeakenedStatement</code>, <code>ShadowDef</code>, <code>InstanceOverride</code>, <code>StatementUsesCandidateDef</code>, <code>ClaimUpstreamTheorem</code>, <code>RefKindUpstreamButCandidateRef</code>, <code>RefKindVariantButUpstreamRef</code>, <code>FakeEqLemma</code>, <code>OutsideNamespace</code>, <code>UpstreamNamespaceHelper</code>, <code>BrokenProof</code></td>
+              <td><code>ShadowDef</code> (redefining <code>Erdos349.IsGoodPair</code> as <code>True</code>) and <code>InstanceOverride</code> (high-priority <code>LE ℕ</code> returning <code>True</code>) pass <code>lint</code> and <code>axioms</code>, and fail <code>opcheck:statement_match</code> (plus <code>candidate_decls</code> for <code>ShadowDef</code>). <code>FakeEqLemma</code> forges <code>Erdos349.IsGoodPair.eq_helper</code> and fails <code>candidate_decls</code>.</td>
             </tr>
             <tr>
               <td><strong>Kernel-bypass environment edit</strong></td>
@@ -151,92 +158,111 @@
             </tr>
             <tr>
               <td><strong>Lexer &amp; workspace tampering</strong></td>
-              <td>10 <code>lint/*</code> cases + 9 <code>integrity/*</code> cases</td>
+              <td>7 other negative <code>lint/*</code> checks + 8 negative <code>integrity/*</code> checks</td>
               <td>Tests quote-in-char-literal (<code>def c := '"'</code>) before <code>sorry</code>, unterminated string literals before <code>native_decide</code>, nested block comments before <code>axiom</code>, tracked edits and untracked files in <code>.lake/packages/formal_conjectures</code>, <code>lakefile.lean</code> injection, pin/toolchain mismatches, and <code>skipKernelTC</code>/<code>plugins</code> in <code>lakefile.toml</code>.</td>
+            </tr>
+            <tr>
+              <td><strong>Positive controls</strong></td>
+              <td><code>HonestFixture</code>, <code>HonestDecide</code>, <code>RealizedEqLemma</code>, <code>LibGoodUse</code>, <code>lint/honest_result_clean</code>, <code>lint/statement_clean</code>, <code>integrity/baseline_clean_passes</code></td>
+              <td>Confirms valid tactic proofs, kernel <code>decide</code>, compiler-realized equation lemmas (<code>Erdos349.IsGoodPair.eq_1</code>), clean shared helpers in <code>OpenProofs/Lib/</code>, valid statement files, and the unmodified workspace all pass.</td>
             </tr>
           </tbody>
         </table>
       </div>
 
-      <h2 id="misformalizations">4. Upstream Misformalizations Found via Negation Proofs (#7590)</h2>
+      <h2 id="misformalizations">4. Negation Proofs for Missing-Parameter Value Questions (#7590)</h2>
       <p>
-        142 claims currently pass the checker in <code>open-proofs</code>: 131 proved targets (textbook theorems, test cases, and already-solved research variants whose upstream declarations still carried <code>sorry</code>) and 11 misformalization certificates across 8 Erdős problems.
+        142 claims pass the checker in <code>open-proofs</code> against pinned <code>formal-conjectures</code> commit <code>96343eeb5990</code>: 131 proved targets (129 upstream textbook, test, API, and already-solved research statements whose upstream declarations still carried <code>sorry</code>, plus 2 self-recorded special cases of Erdős 828) and 11 negation certificates across 9 Erdős problems (<code>142</code>, <code>319</code>, <code>321</code>, <code>361</code>, <code>409</code>, <code>450</code>, <code>503</code>, <code>552</code>, and <code>692</code>).
       </p>
       <p>
-        Each of the 11 misformalizations follows the same pattern: an upstream value question quantifies over a parameter (<code>k</code>, <code>N</code>, <code>c</code>, or <code>n</code>), but types its <code>answer(...)</code> placeholder as a constant rather than a function of that parameter. As written, the formal theorem asserts that one fixed value works simultaneously for all values of the quantified parameter, making the statement false for every possible replacement of <code>sorry</code>.
+        Those 11 certificates do not represent a new bug class. Earlier contributors to <code>google-deepmind/formal-conjectures</code> had already reported the same formalization pattern in issues <code>#7327</code>, <code>#7434</code> (covering <code>erdos_409.parts.i</code>), and <code>#7493</code> (covering <code>erdos_450</code> and <code>erdos_552</code>): an open value question quantifies over a parameter (<code>k</code>, <code>N</code>, <code>c</code>, or <code>n</code>), but types its <code>answer(...)</code> placeholder as a single constant rather than a function of that parameter, making the formal statement false for every possible replacement of <code>sorry</code>.
       </p>
       <p>
-        On October 24, 2026, I filed <a href="https://github.com/google-deepmind/formal-conjectures/issues/7590"><code>google-deepmind/formal-conjectures#7590</code></a> covering the eight declarations across seven files still unchanged on upstream <code>main</code> (after earlier upstream issues covered the other three):
+        In <code>open-proofs</code>, agents write candidate notes to <a href="https://github.com/KilianTheMagnificent/open-proofs/tree/main/outbox"><code>outbox/</code></a>—which contains unfiled local draft notes only (including 10 per-problem drafts, one of which, Erdős 506, is only a conditional argument with no result file) and never submits anything externally. Excluding the three declarations already covered in <code>#7434</code> and <code>#7493</code>, I filed <strong>one upstream issue</strong> on October 24, 2026—<a href="https://github.com/google-deepmind/formal-conjectures/issues/7590"><code>google-deepmind/formal-conjectures#7590</code></a> (with explicit disclosure that Claude Code found the instances and wrote the Lean proofs)—covering the remaining <strong>8 declarations across 7 Erdős problems</strong> that were unchanged on upstream <code>main</code> (<code>c094b97</code>) at that time. Issue <code>#7590</code> itself remains open with 0 comments; separate upstream PRs later parameterized four of the eight declarations independently (<code>#7946</code> on 2026-11-13 and <code>#8015</code> on 2026-11-16):
       </p>
 
       <div class="table-wrap">
         <table>
           <thead>
             <tr>
-              <th>Upstream Statement</th>
+              <th>Upstream Declaration</th>
               <th>Missing Parameter</th>
-              <th>Why No Constant Answer Exists</th>
+              <th>Why No Constant Answer Works</th>
+              <th>Upstream Status (2026-11-16)</th>
             </tr>
           </thead>
           <tbody>
             <tr>
               <td><code>erdos_142</code>, <code>erdos_142.variants.isTheta</code></td>
               <td><code>k</code></td>
-              <td><code>r 0 N = N</code> and <code>r 2 N ≤ 1</code>; no single function is asymptotic (or <code>Θ</code>) to both.</td>
+              <td><code>r 0 N = N</code> and <code>r 2 N ≤ 1</code>, so no single function is asymptotic (or <code>Θ</code>) to both.</td>
+              <td>Unchanged on <code>main</code></td>
             </tr>
             <tr>
               <td><code>erdos_319</code></td>
               <td><code>N</code></td>
-              <td>Maximum is <code>≤ 1</code> at <code>N = 1</code>, and <code>≥ 3</code> at <code>N = 6</code> via <code>{2, 3, 6}</code> (<code>1/2 - 1/3 - 1/6 = 0</code>).</td>
+              <td>Maximum is at most <code>1</code> for <code>N = 1</code>, and at least <code>3</code> for <code>N = 6</code> via <code>{2, 3, 6}</code> (<code>1/2 - 1/3 - 1/6 = 0</code>).</td>
+              <td>Unchanged on <code>main</code></td>
             </tr>
             <tr>
               <td><code>erdos_321</code></td>
               <td><code>N</code></td>
               <td><code>R 0 = 0</code> and <code>R 1 ≥ 1</code>.</td>
+              <td>Unchanged on <code>main</code></td>
             </tr>
             <tr>
               <td><code>erdos_361</code></td>
               <td><code>c</code></td>
-              <td>At <code>n = 2</code>, the count is <code>0</code> for <code>c = 1/4</code> and <code>1</code> for <code>c = 1</code>.</td>
+              <td>At <code>n = 2</code>, the value is <code>0</code> for <code>c = 1/4</code> and <code>1</code> for <code>c = 1</code>.</td>
+              <td>Updated independently in <code>#8015</code></td>
             </tr>
             <tr>
               <td><code>erdos_409.variants.sigma</code></td>
               <td><code>n</code></td>
-              <td>Least iteration count is <code>0</code> for <code>n = 2</code> and positive for <code>n = 6</code> (<code>σ(6) - 1 = 11</code> is prime).</td>
+              <td>Least count is <code>0</code> for <code>n = 2</code> and positive for <code>n = 6</code> (<code>σ 6 - 1 = 11</code> is prime, so <code>hterm</code> holds).</td>
+              <td>Updated independently in <code>#8015</code></td>
             </tr>
             <tr>
               <td><code>erdos_503</code></td>
               <td><code>n</code></td>
-              <td>In <code>ℝ^0</code> the maximum is <code>≤ 1</code>; in <code>ℝ^1</code> it is <code>≥ 2</code>.</td>
+              <td>In <code>ℝ^0</code> the maximum is at most <code>1</code>; in <code>ℝ^1</code> it is at least <code>2</code>.</td>
+              <td>Updated independently in <code>#7946</code></td>
             </tr>
             <tr>
               <td><code>erdos_692.parts.ii</code></td>
               <td><code>n</code></td>
-              <td>Choosing <code>n = m</code> gives <code>δ₁(m, m) = 0</code>, while <code>δ₁(m, m + 2) = 1/(m + 1) &gt; 0</code>.</td>
+              <td>Taking <code>n</code> equal to the answer <code>m</code> gives <code>δ₁(m, m) = 0</code>, whereas <code>δ₁(m, m + 2) = 1/(m + 1) &gt; 0</code>.</td>
+              <td>Updated independently in <code>#8015</code></td>
             </tr>
           </tbody>
         </table>
       </div>
 
       <p>
-        Because referencing the upstream <code>answer</code> placeholder would pull <code>sorryAx</code> into the axiom walk, each certificate records and proves the answer-free universal negation (e.g., <a href="https://github.com/KilianTheMagnificent/open-proofs/blob/main/OpenProofs/Results/Erdos/P319_no_constant_answer.lean"><code>P319_no_constant_answer.lean</code></a> proves <code>∀ a : ℕ, ¬ ∀ N : ℕ, IsGreatest { … } a</code> using only <code>propext</code>, <code>Classical.choice</code>, and <code>Quot.sound</code>). Per repository policy (<a href="https://github.com/KilianTheMagnificent/open-proofs/tree/main/outbox"><code>outbox/README.md</code></a>), agents write drafts locally to <code>outbox/</code> and never open issues or PRs themselves; human review and explicit AI disclosure happen manually before filing.
+        Because referencing the upstream <code>answer</code> placeholder would pull <code>sorryAx</code> into Layer 4's axiom walk, each certificate records and proves the answer-free universal negation using only <code>propext</code>, <code>Classical.choice</code>, and <code>Quot.sound</code>—for example, lines 16–20 of <a href="https://github.com/KilianTheMagnificent/open-proofs/blob/main/OpenProofs/Results/Erdos/P319_no_constant_answer.lean"><code>P319_no_constant_answer.lean</code></a>:
       </p>
+<pre><code>open scoped Finset in
+theorem erdos_319.no_constant_answer : ∀ a : ℕ, ¬ ∀ N : ℕ, IsGreatest
+    { #A | (A) (_ : A ⊆ Finset.Icc 1 N)
+      (_ : ∃ δ : ℕ → ℤˣ, ∑ n ∈ A, (δ n : ℚ) / n = 0 ∧
+        ∀ A' ⊂ A, A'.Nonempty → ∑ n ∈ A', (δ n : ℚ) / n ≠ 0) } a := by</code></pre>
 
       <h2 id="limitations">5. Scope &amp; Known Limitations</h2>
       <ul>
         <li><strong>Formal statement fidelity vs. informal intent:</strong> Passing all five layers verifies that the candidate proof term inhabits the elaborated Lean <code>Expr</code> of the reference theorem under the axioms <code>{propext, Classical.choice, Quot.sound}</code>. It does not check whether an upstream formalization faithfully captures the informal mathematical problem—which is why <code>ledger/LEDGER.md</code> separates checker verdicts from claim assessments.</li>
         <li><strong>Trusted computing base (<code>TRUSTED_BASE</code>):</strong> Verdicts depend on the integrity of <code>TRUSTED_BASE</code> hashed in <code>scripts/check.py</code>—<code>lakefile.toml</code>, <code>lean-toolchain</code> (<code>v4.33.1</code>), <code>lake-manifest.json</code>, <code>upstream.json</code>, <code>OpenProofsChecker/Main.lean</code>, <code>scripts/check.py</code>, and <code>scripts/lint.py</code>—along with the Lean 4 kernel, <code>leanchecker</code>, Python 3, git, and the pinned <code>formal-conjectures</code> (<code>96343ee</code>) and <code>Mathlib</code> (<code>0df444a</code>) revisions. Soundness bugs inside the Lean kernel or a compromised local toolchain binary are outside <code>opcheck</code>'s scope.</li>
         <li><strong>Checker ≠ OS sandbox:</strong> Although <code>integrity</code> rejects <code>lakefile.lean</code> and plugins and <code>lint</code> rejects <code>run_cmd</code>, <code>#eval</code>, and <code>Lean.Elab</code> imports before <code>lake build</code> runs, <code>scripts/check.py</code> is an unverified Python driver, not an OS or VM sandbox. Unattended prover processes should still run inside filesystem- and network-isolated containers.</li>
-        <li><strong>No open mathematical problem is solved in <code>open-proofs</code>:</strong> As stated in <code>open-proofs/README.md</code>, the 131 proved claims are textbook theorems, test statements, and previously solved research problems whose upstream Lean declarations were still <code>sorry</code>, alongside 11 negation certificates for misformalized value questions.</li>
+        <li><strong>AI authorship &amp; mathematical scope:</strong> Both the proof scripts and the checker tooling in <code>open-proofs</code> were written with Claude Code and Codex. As stated in <code>open-proofs/README.md</code>, no open mathematical problem has been solved here: the 131 proved claims are textbook results, test/API statements, and previously solved research variants whose upstream Lean declarations were still <code>sorry</code>, alongside 11 negation certificates for missing-parameter value questions.</li>
       </ul>
 
       <h2 id="reproduce">6. Reproduce</h2>
-<pre><code>git clone https://github.com/KilianTheMagnificent/open-proofs.git
-cd open-proofs
-lake exe cache get
+      <p>
+        From <code>open-proofs/README.md</code> (lines 47–50):
+      </p>
+<pre><code>lake exe cache get
 lake build
-python3 scripts/check.py --all       # re-check all 142 claims
-python3 tests/run_adversarial.py     # run all 48 self-test expectations</code></pre>
+python3 scripts/check.py --all       # re-check every claim
+python3 tests/run_adversarial.py     # checker self-tests</code></pre>
     </article>
 
     <footer class="site-footer">
