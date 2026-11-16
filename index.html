@@ -3,8 +3,8 @@
 <head>
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
-  <title>Andre Romero-Carey — Security &amp; Verification Notes</title>
-  <meta name="description" content="Technical notes by Andre Romero-Carey on input-validation libraries and machine-checked Lean 4 verification.">
+  <title>Andre Romero-Carey — Notes</title>
+  <meta name="description" content="Technical notes by Andre Romero-Carey on input validation and machine-checked Lean 4 verification.">
   <meta name="author" content="Andre Romero-Carey">
   <link rel="canonical" href="https://kilianthemagnificent.github.io/">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2318181b'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='700' fill='%23fcfcfa' text-anchor='middle'%3EAR%3C/text%3E%3C/svg%3E">
@@ -16,38 +16,23 @@
       <a class="site-brand" href="./">Andre Romero-Carey</a>
       <nav class="site-nav" aria-label="Primary">
         <a href="#notes">Notes</a>
-        <a href="#disclosures">Upstream Issues</a>
-        <a href="#repositories">Repositories</a>
         <a href="https://github.com/KilianTheMagnificent">GitHub</a>
         <a href="https://www.linkedin.com/in/andre-romerocarey">LinkedIn</a>
       </nav>
     </header>
 
     <main>
-      <h1>Andre Romero-Carey — Security &amp; Verification Notes</h1>
-      <p class="subtitle">Software Developer · St. Louis, MO</p>
-
-      <div class="meta-links">
-        <a href="https://github.com/KilianTheMagnificent">github.com/KilianTheMagnificent</a>
-        <span class="sep" aria-hidden="true">·</span>
-        <a href="https://www.linkedin.com/in/andre-romerocarey">linkedin.com/in/andre-romerocarey</a>
-      </div>
+      <h1>Andre Romero-Carey</h1>
+      <p class="subtitle">Technical notes · St. Louis, MO</p>
 
       <p>
-        Software developer working on input-validation libraries and machine-checked Lean 4 verification. The notes here examine what breaks when untrusted files, inbound mail, CSV exports, or AI-generated proof scripts pass into compilers, spreadsheets, or external model APIs without explicit validation in front of them.
-      </p>
-      <p>
-        All adversarial test cases referenced below—checker tamper/bypass modules, disguised binary headers, CSV formula strings, and hidden HTML/Unicode markers—are synthetic local regression fixtures run against my own repositories.
+        Personal repositories and technical notes on input validation and machine-checked Lean 4 verification—specifically what breaks when untrusted files, inbound mail, CSV exports, or AI-generated proof scripts pass into compilers, spreadsheets, or external model APIs without explicit checks in front of them. All tamper/bypass modules, disguised binary headers, CSV formula strings, and hidden HTML/Unicode markers referenced below are synthetic local regression fixtures in these repositories.
       </p>
 
-      <h2 id="notes">Research Notes</h2>
+      <h2 id="notes">Notes</h2>
       <ul class="note-list">
         <li class="note-card">
-          <div class="note-card-meta">
-            <span>2026-11-16 (covers #7590 filed 2026-10-24)</span>
-            <span class="badge">Lean 4</span>
-            <span class="badge">Proof Checking</span>
-          </div>
+          <div class="note-card-meta">2026-11-16 (covers #7590 filed 2026-10-24)</div>
           <h3><a href="notes/lean4-verifier-adversarial-suite.html">Checking Untrusted AI-Authored Lean 4 Proofs</a></h3>
           <p>
             Why <code>lake build</code> plus a <code>sorry</code> grep fails when unattended coding agents write Lean proofs. Walks through <code>open-proofs</code> (where proofs and tooling were built with Claude Code and Codex and verified by a 5-layer checker: <code>integrity</code>, <code>lint</code>, clean <code>build</code>, <code>opcheck</code>, <code>leanchecker</code>), the 48 self-test checks in <code>tests/run_adversarial.py</code> (41 negative tamper/bypass checks plus 7 positive controls), checker scope limits, and the negation proofs behind <code>google-deepmind/formal-conjectures#7590</code>.
@@ -55,11 +40,7 @@
         </li>
 
         <li class="note-card">
-          <div class="note-card-meta">
-            <span>2026-11-16</span>
-            <span class="badge">Input Screening</span>
-            <span class="badge">LLM Triage</span>
-          </div>
+          <div class="note-card-meta">2026-11-16</div>
           <h3><a href="notes/untrusted-office-input-defenses.html">Screening Untrusted Office Inputs Before LLM Triage</a></h3>
           <p>
             Design and known limits of <code>inbox-guard</code>, a zero-dependency Node.js library that screens inbound business emails, attachments, and CSV exports before model calls or human review. Covers leading magic-byte checks (<code>MZ</code>/<code>ELF</code>/<code>Mach-O</code>/archives renamed to document extensions), Unicode <code>U+202E</code> and Windows/SMB filename spoofing, accounting-safe OWASP CSV neutralization and RFC-4180 serialization, linear HTML5 comment and CSS declaration scanning, Plane-14 Unicode Tag (<code>U+E0000..U+E007F</code>) stripping, RFC 5322 sender spoofing, and randomized session-scoped PII tokenization.
@@ -67,29 +48,15 @@
         </li>
       </ul>
 
-      <h2 id="disclosures">Upstream Issues</h2>
-      <div class="table-wrap">
-        <table>
-          <thead>
-            <tr>
-              <th>Date</th>
-              <th>Issue &amp; Status</th>
-              <th>Details</th>
-            </tr>
-          </thead>
-          <tbody>
-            <tr>
-              <td>2026-10-24</td>
-              <td><a href="https://github.com/google-deepmind/formal-conjectures/issues/7590"><code>google-deepmind/formal-conjectures#7590</code></a><br><small>(open, 0 comments)</small></td>
-              <td>
-                Applied a missing-quantified-parameter pattern earlier contributors had reported (<code>#7327</code>, <code>#7434</code>, <code>#7493</code>) to 8 remaining open value-question declarations across 7 Erdős problems (<code>142</code> [2 declarations], <code>319</code>, <code>321</code>, <code>361</code>, <code>409</code> <code>variants.sigma</code>, <code>503</code>, and <code>692</code> <code>parts.ii</code>) whose <code>answer</code> placeholder omitted a quantified parameter (<code>k</code>, <code>N</code>, <code>c</code>, or <code>n</code>), making each formal statement false for every value of the placeholder. Backed by kernel-checked Lean 4 negation proofs (built with Claude Code, disclosed in the issue) using only <code>propext</code>, <code>Classical.choice</code>, and <code>Quot.sound</code>. Separate upstream PRs later parameterized 4 of the 8 declarations independently (<code>#7946</code>, <code>#8015</code>); the other 4 remain unchanged on <code>main</code>.
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      </div>
+      <h2 id="upstream">Upstream issues</h2>
+      <ul>
+        <li>
+          <a href="https://github.com/google-deepmind/formal-conjectures/issues/7590"><code>google-deepmind/formal-conjectures#7590</code></a> (2026-10-24; open, 0 comments) —
+          Applied a missing-quantified-parameter pattern earlier contributors had reported (<code>#7327</code>, <code>#7434</code>, <code>#7493</code>) to 8 remaining open value-question declarations across 7 Erdős problems (<code>142</code> [2 declarations], <code>319</code>, <code>321</code>, <code>361</code>, <code>409</code> <code>variants.sigma</code>, <code>503</code>, and <code>692</code> <code>parts.ii</code>) whose <code>answer</code> placeholder omitted a quantified parameter (<code>k</code>, <code>N</code>, <code>c</code>, or <code>n</code>), making each formal statement false for every value of the placeholder. Backed by kernel-checked Lean 4 negation proofs (built with Claude Code, disclosed in the issue) using only <code>propext</code>, <code>Classical.choice</code>, and <code>Quot.sound</code>. Separate upstream PRs later parameterized 4 of the 8 declarations independently (<code>#7946</code>, <code>#8015</code>); the other 4 remain unchanged on <code>main</code>.
+        </li>
+      </ul>
 
-      <h2 id="repositories">Public Repositories</h2>
+      <h2 id="repositories">Repositories</h2>
       <ul>
         <li>
           <strong><a href="https://github.com/KilianTheMagnificent/open-proofs"><code>KilianTheMagnificent/open-proofs</code></a></strong> —

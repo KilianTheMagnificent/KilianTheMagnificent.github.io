@@ -1,6 +1,6 @@
 # kilianthemagnificent.github.io
 
-Security and formal-verification notes by **Andre Romero-Carey**.
+Technical notes by **Andre Romero-Carey** on input validation and machine-checked Lean 4 verification.
 
 Live site: [https://kilianthemagnificent.github.io](https://kilianthemagnificent.github.io)
 
