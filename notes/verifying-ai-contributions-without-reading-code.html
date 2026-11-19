@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Verifying AI-Assisted Contributions Without Reading Code — Andre Romero-Carey</title>
+  <meta name="description" content="How to verify AI-assisted open-source work without reading code line by line: reproducible config checks (modelcontextprotocol/inspector#2980 -> PR #3016), kernel-checked Lean 4 proofs (google-deepmind/formal-conjectures#7590), and four-invoice behavioral checks (inbox-guard v0.1.0).">
+  <meta name="author" content="Andre Romero-Carey">
+  <link rel="canonical" href="https://kilianthemagnificent.github.io/notes/verifying-ai-contributions-without-reading-code.html">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2318181b'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='700' fill='%23fcfcfa' text-anchor='middle'%3EAR%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="container">
+    <header class="site-header">
+      <a class="site-brand" href="../">Andre Romero-Carey</a>
+      <nav class="site-nav" aria-label="Primary">
+        <a href="../">All Notes</a>
+        <a href="untrusted-office-input-defenses.html">← Previous Note</a>
+        <a href="https://github.com/KilianTheMagnificent">GitHub</a>
+      </nav>
+    </header>
+
+    <article>
+      <div class="article-meta">
+        Published 2026-11-18 · Case studies: <a href="https://github.com/modelcontextprotocol/inspector/issues/2980"><code>inspector#2980</code></a> (<a href="https://github.com/modelcontextprotocol/inspector/pull/3016"><code>PR #3016</code></a>), <a href="https://github.com/google-deepmind/formal-conjectures/issues/7590"><code>formal-conjectures#7590</code></a>, <a href="https://github.com/KilianTheMagnificent/inbox-guard/releases/tag/v0.1.0"><code>inbox-guard v0.1.0</code></a>
+      </div>
+      <h1>Verifying AI-Assisted Contributions Without Reading Code</h1>
+      <p class="article-lede">
+        I am not a software engineer and I do not read TypeScript, Lean 4, or JavaScript implementations line by line. When an AI coding assistant builds a command, checks a configuration file, or writes a proof, its own summary is not verification. Contributing honestly without reading code means shifting the check onto an independent oracle: a before-and-after command whose output proves a config file loaded, a proof kernel that rejects invalid deductions, or a small invented fixture where both what must change and what must survive are written down before running the tool. This note documents three concrete cases—two upstream issue contributions and one owned CLI release—with the exact commands, observed outputs, and limits of the method.
+      </p>
+
+      <nav class="toc" aria-label="Table of contents">
+        <div class="toc-title">Contents</div>
+        <ol>
+          <li><a href="#core-rule">The Core Rule: Predict What Changes and What Survives</a></li>
+          <li><a href="#case-inspector">Case 1 — Reproducible Config &amp; Tool-List Check (<code>inspector#2980</code> → <code>PR #3016</code>)</a></li>
+          <li><a href="#case-formal-conjectures">Case 2 — Kernel-Checked Formal Evidence (<code>formal-conjectures#7590</code> &amp; <code>open-proofs</code>)</a></li>
+          <li><a href="#case-inbox-guard">Case 3 — Four-Invoice Behavioral Walkthrough (<code>inbox-guard v0.1.0</code>)</a></li>
+          <li><a href="#summary-matrix">Comparison &amp; Reusable Verification Checklist</a></li>
+          <li><a href="#limits">Scope &amp; Honest Limits</a></li>
+        </ol>
+      </nav>
+
+      <h2 id="core-rule" class="no-rule">1. The Core Rule: Predict What Changes and What Survives</h2>
+      <p>
+        Unverified AI pull requests waste maintainer time because the person opening them cannot answer follow-up questions about edge cases or architecture. A practical alternative for a non-coder is to keep contributions strictly within what can be verified externally—reproducible documentation checks, minimal bug reports, or machine-checked formal counterexamples—and never open uninvited code pull requests.
+      </p>
+      <p>
+        Before accepting an assistant's claim or posting anything publicly, write down three things:
+      </p>
+      <ol>
+        <li><strong>One observable thing that must change:</strong> a tool disappearing from a JSON list, a checker exit code flipping from <code>2</code> to <code>0</code>, or a Lean kernel accepting a theorem without <code>sorry</code>.</li>
+        <li><strong>One nearby value that must survive untouched:</strong> an unaffected tool call, a negative refund amount, a multiline quoted cell, or the original input file on disk.</li>
+        <li><strong>An independent oracle and plain disclosure:</strong> record the exact commit or release, use only invented sample data, run the check from a clean copy, and state plainly which AI tools helped run the check or write the code.</li>
+      </ol>
+
+      <h2 id="case-inspector">2. Case 1 — Reproducible Config &amp; Tool-List Check (<code>modelcontextprotocol/inspector#2980</code> → <code>PR #3016</code>)</h2>
+      <p>
+        <a href="https://github.com/modelcontextprotocol/inspector"><code>modelcontextprotocol/inspector</code></a> explicitly asks outside contributors for issues rather than pull requests. In November 2026, open issue <a href="https://github.com/modelcontextprotocol/inspector/issues/2980"><code>#2980</code></a> (<em>"docs: add a config reference for the composable test server"</em>) tracked adding a configuration reference so users could run custom test servers without reading TypeScript source files.
+      </p>
+      <p>
+        The existing setup table described the default stdio fixture as having a fixed configuration, even though the repository already shipped a tiny JSON file, <a href="https://github.com/modelcontextprotocol/inspector/blob/488c30d9d16e4993bc548ad298eb7450f5125c93/test-servers/configs/demo.json"><code>test-servers/configs/demo.json</code></a>:
+      </p>
+<pre><code>{
+  "serverInfo": {
+    "name": "composable-demo",
+    "version": "1.0.0"
+  },
+  "tools": [{ "preset": "echo" }, { "preset": "get_temp" }],
+  "transport": {
+    "type": "stdio"
+  }
+}</code></pre>
+      <p>
+        Without reading the server's TypeScript implementation, checking whether <code>server-composable.js --config</code> truly worked over stdio came down to a simple before-and-after behavioral test (run locally with Codex against the 2.15.0 fixture, disclosed in the comment):
+      </p>
+      <ul>
+        <li><strong>Baseline run:</strong> Run <code>server-composable.js --config test-servers/configs/demo.json</code> over stdio and list available tools → offered <code>echo</code> and <code>get_temp</code>; calling <code>echo</code> returned <code>Echo: invoice 42</code>.</li>
+        <li><strong>Modified copy (what must change):</strong> Remove the <code>get_temp</code> preset from a copy of <code>demo.json</code> and re-run → listing tools returned only <code>echo</code>.</li>
+        <li><strong>Invariant check (what must survive):</strong> Calling <code>echo</code> on the edited config still returned <code>Echo: invoice 42</code> for the same invented input.</li>
+      </ul>
+      <p>
+        Comparing the tool list before and after a one-line JSON edit proves the custom file actually loaded instead of silently falling back to defaults. On 2026-11-18, I posted that short evidence-backed suggestion on <a href="https://github.com/modelcontextprotocol/inspector/issues/2980#issuecomment-6981313923"><code>#2980</code></a>. Later the same day, maintainer <code>cliffhall</code> merged <a href="https://github.com/modelcontextprotocol/inspector/pull/3016"><code>PR #3016</code></a> into <code>v2/main</code> (<code>9e9b1b80</code>), crediting the comment in the PR description (<em>"<code>configs/demo.json</code> as the minimal stdio example (suggested in the issue's comments)"</em>), adopting the before-and-after <code>tools/list</code> verification tip verbatim in <a href="https://github.com/modelcontextprotocol/inspector/blob/9e9b1b8080460eb873b994cc29a579fa32c15961/docs/test-servers.md#L49-L56"><code>docs/test-servers.md</code></a>, and closing <code>#2980</code> (<a href="https://github.com/modelcontextprotocol/inspector/issues/2980#issuecomment-6989869917">comment</a>).
+      </p>
+
+      <h2 id="case-formal-conjectures">3. Case 2 — Kernel-Checked Formal Evidence (<code>google-deepmind/formal-conjectures#7590</code> &amp; <code>open-proofs</code>)</h2>
+      <p>
+        For mathematical formalizations, running a CLI is not enough—a plausible-looking natural-language argument from an AI model can easily be wrong. In <a href="https://github.com/KilianTheMagnificent/open-proofs"><code>open-proofs</code></a>, Claude Code and Codex generate Lean 4 proof scripts, and acceptance rests on a five-layer checker (<code>integrity</code>, <code>lint</code>, clean <code>build</code>, <code>opcheck</code>, and <code>leanchecker</code>) rather than human code review (see the companion note <a href="lean4-verifier-adversarial-suite.html">Checking Untrusted AI-Authored Lean 4 Proofs</a>).
+      </p>
+      <p>
+        Earlier contributors to <a href="https://github.com/google-deepmind/formal-conjectures"><code>google-deepmind/formal-conjectures</code></a> had already reported value-question statements whose <code>answer(...)</code> placeholder omitted a quantified parameter (<code>#7327</code>, <code>#7434</code>, <code>#7493</code>). Rather than reporting candidate statements from a text scan alone, we required a kernel-checked negation proof (<code>∀ a, ¬ ∀ param, ...</code>) using only Lean's standard axioms (<code>propext</code>, <code>Classical.choice</code>, <code>Quot.sound</code>) for every reported declaration:
+      </p>
+      <ul>
+        <li><strong>What must hold for the proof:</strong> Each of the 8 declarations across 7 Erdős problems (<code>142</code> [2 declarations], <code>319</code>, <code>321</code>, <code>361</code>, <code>409</code> <code>variants.sigma</code>, <code>503</code>, and <code>692</code> <code>parts.ii</code>) compiles against pinned upstream <code>96343eeb5990</code>, matches its statement definitionally in <code>opcheck</code>, uses only standard axioms, and passes independent <code>leanchecker</code> replay.</li>
+        <li><strong>What must hold for the checker itself:</strong> The checker must fail on deliberate cheats (comment/string evasion, <code>sorry</code>, <code>native_decide</code>, shadowed definitions, tampered <code>lakefile.toml</code> pins) and keep every recorded verdict tied to a single SHA-256 hash of the trusted checker files (<code>TRUSTED_BASE</code>).</li>
+      </ul>
+      <p>
+        Even on a lightweight runner without downloading Mathlib, <a href="https://github.com/KilianTheMagnificent/open-proofs/blob/main/.github/workflows/checker-ci.yml"><code>.github/workflows/checker-ci.yml</code></a> (commit <code>70a5590</code>, verified in <a href="https://github.com/KilianTheMagnificent/open-proofs/actions/runs/44427818995">CI run 44427818995</a>) enforces the fast Python self-tests, pin checks, full-claim source lint, and <code>trusted_base_sha256</code> consistency on every push:
+      </p>
+<pre><code>$ python3 tests/run_adversarial.py --only lint
+ok   lint/char_literal_quote_cannot_hide_sorry
+ok   lint/comment_mention_of_sorry_flagged_raw
+ok   lint/unterminated_string_cannot_hide_code
+ok   lint/nested_comment_close_handled
+ok   lint/csimp_flagged
+ok   lint/lean_import_rejected
+ok   lint/honest_result_clean
+ok   lint/statement_def_rejected
+ok   lint/statement_with_proof_rejected
+ok   lint/statement_clean
+
+10/10 expectations hold
+
+# Static pin check + 3 lakefile tamper assertions + lint_layer on all 142 claims + ledger check:
+OK: pins valid, 3/3 lakefile tamper checks pass, 142/142 claims pass lint &amp; ledger PASS check (trusted_base=10a78286602f).</code></pre>
+      <p>
+        I filed <a href="https://github.com/google-deepmind/formal-conjectures/issues/7590"><code>#7590</code></a> on 2026-10-24 linking all eight Lean proof files, explicitly stating that Claude Code found the instances and wrote the proofs and that no human reviewed them line by line, and marking the issue up for grabs rather than submitting an unreviewed PR. Separate upstream PRs (<code>#7946</code> and <code>#8015</code>) later fixed four of the eight declarations independently. On 2026-11-18, after re-checking all eight declarations against upstream <code>b576d52</code> with Codex, I posted a short <a href="https://github.com/google-deepmind/formal-conjectures/issues/7590#issuecomment-6981638137">status follow-up</a> listing the four still-open statements (also tracked in <code>#7977</code> and open <a href="https://github.com/google-deepmind/formal-conjectures/pull/7990"><code>PR #7990</code></a>).
+      </p>
+
+      <h2 id="case-inbox-guard">4. Case 3 — Four-Invoice Behavioral Walkthrough (<code>inbox-guard v0.1.0</code>)</h2>
+      <p>
+        The same rule applies to an owned repository built with AI assistance. Before tagging <a href="https://github.com/KilianTheMagnificent/inbox-guard/releases/tag/v0.1.0"><code>inbox-guard v0.1.0</code></a> (commit <code>d8cbb15</code>), we verified a fresh clone directly against the walkthrough in <a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/v0.1.0/docs/checking-a-change.md"><code>docs/checking-a-change.md</code></a> using the four invented invoices in <a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/v0.1.0/examples/invoices.csv"><code>examples/invoices.csv</code></a>.
+      </p>
+      <p>
+        Writing predictions down first prevents an empty-findings bug from fooling you (for instance, a tool that silently drops rows or corrupts negative amounts):
+      </p>
+      <ul>
+        <li><strong>Must change:</strong> <code>INV-002</code>'s memo (<code>=2+3</code>, row 3, col 4) becomes <code>"'=2+3"</code>; <code>INV-004</code>'s memo (<code>+2+3</code>, row 5, col 4) becomes <code>"'+2+3"</code>; <code>check-csv</code> moves from exit code <code>2</code> (2 findings) to exit code <code>0</code> (0 findings).</li>
+        <li><strong>Must survive:</strong> The refund of <code>-42.50</code> (and <code>-7.25</code>), the comma in <code>"Alpine, Ltd."</code>, the multiline quoted delivery note in <code>INV-003</code>, the 5-row by 4-column shape, and the original <code>examples/invoices.csv</code> file on disk.</li>
+      </ul>
+      <p>
+        Below is the verbatim transcript from a clean temporary clone of <code>inbox-guard</code> at <code>d8cbb15</code> on Node <code>v26.13.1</code> (<code>npm test</code> also passed 16/16 tests in 569 ms):
+      </p>
+<pre><code>$ git clone https://github.com/KilianTheMagnificent/inbox-guard.git &amp;&amp; cd inbox-guard
+$ printf '%s\n' 'Send invoice 42 to orders@example.org.' | node ./bin/inbox-guard.mjs redact -
+Send invoice 42 to &lt;EMAIL_1_351174&gt;.
+
+$ node ./bin/inbox-guard.mjs check-csv examples/invoices.csv
+{
+  "safe": false,
+  "rowCount": 5,
+  "columnCount": 4,
+  "findings": [
+    {
+      "row": 3,
+      "column": 4
+    },
+    {
+      "row": 5,
+      "column": 4
+    }
+  ]
+}
+# exit code: 2
+
+$ node ./bin/inbox-guard.mjs sanitize-csv examples/invoices.csv --output reviewed-invoices.csv
+# exit code: 0
+
+$ cat reviewed-invoices.csv
+Invoice,Vendor,Balance,Memo
+INV-001,"Alpine, Ltd.",-42.50,Refund received
+INV-002,Harbor Supplies,17.00,"'=2+3"
+INV-003,Paper Mill,0.00,"First delivery
+Second delivery, marked ""received"""
+INV-004,Harbor Supplies,-7.25,"'+2+3"
+
+$ node ./bin/inbox-guard.mjs check-csv reviewed-invoices.csv
+{
+  "safe": true,
+  "rowCount": 5,
+  "columnCount": 4,
+  "findings": []
+}
+# exit code: 0
+
+$ node ./bin/inbox-guard.mjs sanitize-csv examples/invoices.csv --output reviewed-invoices.csv
+inbox-guard error: Output already exists. Choose a new filename.
+# exit code: 1</code></pre>
+      <p>
+        Re-running <code>check-csv examples/invoices.csv</code> after the overwrite test returned exit code <code>2</code> with the exact same two coordinates (rows 3 and 5, column 4), confirming the original export was never modified.
+      </p>
+
+      <h2 id="summary-matrix">5. Comparison &amp; Reusable Verification Checklist</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Case</th>
+              <th>Independent Oracle</th>
+              <th>What Changed</th>
+              <th>What Survived</th>
+              <th>Outcome</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><a href="https://github.com/modelcontextprotocol/inspector/issues/2980"><code>inspector#2980</code></a></td>
+              <td>Running <code>server-composable.js --config</code> over stdio + <code>tools/list</code></td>
+              <td>Removing <code>get_temp</code> dropped it from the tool list</td>
+              <td><code>echo</code> still returned <code>Echo: invoice 42</code></td>
+              <td>Credited and merged in <a href="https://github.com/modelcontextprotocol/inspector/pull/3016"><code>PR #3016</code></a> (<code>v2/main</code>)</td>
+            </tr>
+            <tr>
+              <td><a href="https://github.com/google-deepmind/formal-conjectures/issues/7590"><code>formal-conjectures#7590</code></a></td>
+              <td>Lean 4 kernel + 5-layer checker (<code>opcheck</code>, <code>leanchecker</code>, 48 self-tests)</td>
+              <td>Answer-free negations accepted under standard axioms</td>
+              <td>Pinned upstream untouched; all 142 claims share one <code>TRUSTED_BASE</code> hash</td>
+              <td>4 of 8 fixed independently (<code>#7946</code>, <code>#8015</code>); 4 tracked in <code>#7590</code> / <code>#7990</code></td>
+            </tr>
+            <tr>
+              <td><a href="https://github.com/KilianTheMagnificent/inbox-guard/releases/tag/v0.1.0"><code>inbox-guard v0.1.0</code></a></td>
+              <td>Fresh clone + <code>npm test</code> (16/16) + 4-invoice CLI walkthrough + CI/CodeQL</td>
+              <td>Memos in rows 3 &amp; 5 prefixed with <code>'</code>; exit code <code>2</code> → <code>0</code></td>
+              <td><code>-42.50</code> refund, vendor comma, multiline note, untouched original</td>
+              <td>Tagged &amp; released as <a href="https://github.com/KilianTheMagnificent/inbox-guard/releases/tag/v0.1.0"><code>v0.1.0</code></a></td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        A compact checklist adapted from <a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/v0.1.0/docs/checking-a-change.md"><code>docs/checking-a-change.md</code></a> works across all three settings:
+      </p>
+      <ol>
+        <li>Check the target project's live contribution and AI policy before doing any work; skip projects that ban AI-assisted work, and keep human-only prose in your own words where required.</li>
+        <li>Record exact version and environment (commit SHA or tag, runtime version, OS).</li>
+        <li>Use small, invented sample inputs only—never real emails, customer rows, or local paths.</li>
+        <li>Write down one expected change and one invariant that must survive before running the command.</li>
+        <li>Run from a clean clone or unmodified baseline and keep the exact observed output and exit codes.</li>
+        <li>State honestly what was checked, what still needs checking (such as a specific spreadsheet app's import dialog), and which AI tools assisted.</li>
+      </ol>
+
+      <h2 id="limits">6. Scope &amp; Honest Limits</h2>
+      <ul>
+        <li><strong>Behavioral spot-checks do not replace code review or security audits:</strong> Observing four invoices or one JSON config confirms that specific behavior, not every edge case in the underlying implementation. That is why <code>inbox-guard</code> keeps outside pull requests turned off, pairs CLI walkthroughs with automated unit/timing tests, CodeQL, and <code>gitleaks</code> scanning, and routes suspected bypasses to Private Vulnerability Reporting.</li>
+        <li><strong>A formal kernel proves formal validity, not informal meaning:</strong> A Lean 4 proof confirms a theorem follows from the pinned Lean definitions under standard axioms; it cannot decide whether a formalization matches the informal mathematical literature.</li>
+        <li><strong>Downstream environments still matter:</strong> Verifying CSV bytes on disk does not guarantee how every version of Excel, Google Sheets, or LibreOffice Calc imports those cells unless you test that specific application and import dialog.</li>
+        <li><strong>Policy compliance is part of verification:</strong> Technical evidence is still unwelcome if it violates a maintainer's AI policy or opens uninvited code PRs on an issue-only repository. Respecting repository rules comes first.</li>
+      </ul>
+
+      <div class="callout">
+        <strong>Related Notes &amp; Repositories</strong>
+        Deep dives into the two owned verification systems referenced above: <a href="lean4-verifier-adversarial-suite.html">Checking Untrusted AI-Authored Lean 4 Proofs</a> (<a href="https://github.com/KilianTheMagnificent/open-proofs"><code>open-proofs</code></a>) and <a href="untrusted-office-input-defenses.html">Screening Untrusted Office Inputs Before LLM Triage</a> (<a href="https://github.com/KilianTheMagnificent/inbox-guard"><code>inbox-guard</code></a>).
+      </div>
+    </article>
+
+    <footer class="site-footer">
+      <span><a href="../">← Back to Notes</a></span>
+      <span><a href="untrusted-office-input-defenses.html">← Previous: Screening Untrusted Office Inputs</a></span>
+    </footer>
+  </div>
+</body>
+</html>

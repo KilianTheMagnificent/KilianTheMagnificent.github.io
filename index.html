@@ -4,7 +4,7 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Andre Romero-Carey — Notes</title>
-  <meta name="description" content="Technical notes by Andre Romero-Carey on input validation and machine-checked Lean 4 verification.">
+  <meta name="description" content="Technical notes by Andre Romero-Carey on verifying AI-assisted work without reading code, input validation, and machine-checked Lean 4 verification.">
   <meta name="author" content="Andre Romero-Carey">
   <link rel="canonical" href="https://kilianthemagnificent.github.io/">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2318181b'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='700' fill='%23fcfcfa' text-anchor='middle'%3EAR%3C/text%3E%3C/svg%3E">
@@ -31,6 +31,14 @@
 
       <h2 id="notes">Notes</h2>
       <ul class="note-list">
+        <li class="note-card">
+          <div class="note-card-meta">2026-11-18</div>
+          <h3><a href="notes/verifying-ai-contributions-without-reading-code.html">Verifying AI-Assisted Contributions Without Reading Code</a></h3>
+          <p>
+            How a non-coder verifies AI-assisted open-source work with independent oracles instead of trusting assistant summaries. Walks through three verified case studies with real commands and outputs: reproducible config/tool-list checks in <code>modelcontextprotocol/inspector#2980</code> (merged in <code>PR #3016</code>), kernel-checked Lean 4 negation proofs in <code>google-deepmind/formal-conjectures#7590</code> (backed by <code>open-proofs</code>), and the four-invoice behavioral walkthrough in <code>inbox-guard v0.1.0</code>.
+          </p>
+        </li>
+
         <li class="note-card">
           <div class="note-card-meta">2026-11-16 (updated 2026-11-18; covers #7590 filed 2026-10-24)</div>
           <h3><a href="notes/lean4-verifier-adversarial-suite.html">Checking Untrusted AI-Authored Lean 4 Proofs</a></h3>
