@@ -4,9 +4,15 @@
   <meta charset="utf-8">
   <meta name="viewport" content="width=device-width, initial-scale=1">
   <title>Andre Romero-Carey — Notes</title>
-  <meta name="description" content="Technical notes by Andre Romero-Carey on verifying AI-assisted work without reading code, input validation, and machine-checked Lean 4 verification.">
+  <meta name="description" content="Technical notes by Andre Romero-Carey on verifying AI-assisted work without reading code, multi-agent coordination with CI oracles, input validation, and machine-checked Lean 4 verification.">
   <meta name="author" content="Andre Romero-Carey">
+  <meta property="og:title" content="Andre Romero-Carey — Notes">
+  <meta property="og:description" content="Technical notes by Andre Romero-Carey on verifying AI-assisted work without reading code, multi-agent coordination with CI oracles, input validation, and machine-checked Lean 4 verification.">
+  <meta property="og:type" content="website">
+  <meta property="og:url" content="https://kilianthemagnificent.github.io/">
+  <meta name="twitter:card" content="summary">
   <link rel="canonical" href="https://kilianthemagnificent.github.io/">
+  <link rel="alternate" type="application/atom+xml" title="Andre Romero-Carey — Notes" href="https://kilianthemagnificent.github.io/feed.xml">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2318181b'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='700' fill='%23fcfcfa' text-anchor='middle'%3EAR%3C/text%3E%3C/svg%3E">
   <link rel="stylesheet" href="styles.css">
 </head>
@@ -16,6 +22,8 @@
       <a class="site-brand" href="./">Andre Romero-Carey</a>
       <nav class="site-nav" aria-label="Primary">
         <a href="#notes">Notes</a>
+        <a href="#repositories">Repositories</a>
+        <a href="feed.xml">Feed</a>
         <a href="https://github.com/KilianTheMagnificent">GitHub</a>
         <a href="https://www.linkedin.com/in/andre-romerocarey">LinkedIn</a>
       </nav>
@@ -26,11 +34,19 @@
       <p class="subtitle">Technical notes · St. Louis, MO</p>
 
       <p>
-        Personal repositories and technical notes on input validation and machine-checked Lean 4 verification—specifically what breaks when untrusted files, inbound mail, CSV exports, or AI-generated proof scripts pass into compilers, spreadsheets, or external model APIs without explicit checks in front of them. All tamper/bypass modules, disguised binary headers, CSV formula strings, and hidden HTML/Unicode markers referenced below are synthetic local regression fixtures in these repositories.
+        Personal repositories and technical notes on verifying AI-assisted software without reading code, coordinating parallel coding agents with CI oracles, input validation, and machine-checked Lean 4 verification—specifically what breaks when untrusted files, inbound mail, CSV exports, concurrent agent worktrees, or AI-generated proof scripts pass into compilers, spreadsheets, CI runners, or external model APIs without explicit checks in front of them. All tamper/bypass modules, disguised binary headers, CSV formula strings, and hidden HTML/Unicode markers referenced below are synthetic local regression fixtures in these repositories.
       </p>
 
       <h2 id="notes">Notes</h2>
       <ul class="note-list">
+        <li class="note-card">
+          <div class="note-card-meta">2026-11-18</div>
+          <h3><a href="notes/coordinating-coding-agents-with-ci-oracles.html">Coordinating Coding Agents and Catching Real Bugs with CI Oracles</a></h3>
+          <p>
+            How a non-coder isolates parallel coding agents behind a worktree protocol (<code>wcp</code>) and uses multi-version Linux GitHub Actions CI as an independent oracle to catch real bugs without reading code. Documents five verified bugs across <code>wcp</code> (232 tests: Python 3.14 SQLite <code>ResourceWarning</code>s, Linux <code>fchmodat(AT_SYMLINK_NOFOLLOW)</code> replaced with <code>O_NOFOLLOW</code> + <code>os.fstat</code> + <code>os.fchmod</code>, a PID-1 grandchild reaping race, and a real <code>Runner.summary()</code> pause-race) and <code>luck-filter</code> (55 tests: glibc <code>lgamma</code>/<code>exp</code> rounding drift at <code>binomial_test(0, 10, 0.5)</code> plus the <code>p0 == 1.0</code> boundary fix).
+          </p>
+        </li>
+
         <li class="note-card">
           <div class="note-card-meta">2026-11-18</div>
           <h3><a href="notes/verifying-ai-contributions-without-reading-code.html">Verifying AI-Assisted Contributions Without Reading Code</a></h3>
@@ -78,12 +94,33 @@
           <strong><a href="https://github.com/KilianTheMagnificent/inbox-guard"><code>KilianTheMagnificent/inbox-guard</code></a></strong> —
           Zero-dependency Node.js attachment, CSV, and inbound-email screening plus randomized session-scoped PII tokenization, tested with <code>node:test</code> and CodeQL (<a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/main/SECURITY.md"><code>SECURITY.md</code></a>).
         </li>
+        <li>
+          <strong><a href="https://github.com/KilianTheMagnificent/agent-verification-playbook"><code>KilianTheMagnificent/agent-verification-playbook</code></a></strong> —
+          Zero-dependency Python 3.9+ pre-flight repository AI-policy scanner (<code>scripts/check_repo_policy.py</code>, including hidden HTML comment/CSS trap and <code>.github/VOUCHED.td</code> detection), five empirical-proof issue templates, and non-coder verification checklists.
+        </li>
+        <li>
+          <strong><a href="https://github.com/KilianTheMagnificent/wcp"><code>KilianTheMagnificent/wcp</code></a></strong> —
+          Workspace Coordination Protocol (v0.3.0): zero-dependency Python 3.9+ CLI coordinating parallel coding agents in one Git repository via isolated detached worktrees, declared write scopes, leases with fencing epochs, and hash-bound verified publishes (232 tests, Ubuntu CI Python 3.11–3.13).
+        </li>
+        <li>
+          <strong><a href="https://github.com/KilianTheMagnificent/luck-filter"><code>KilianTheMagnificent/luck-filter</code></a></strong> (<a href="https://kilianthemagnificent.github.io/luck-filter/">live demo</a>) —
+          Zero-dependency Python 3.9+ multiple-testing and backtest-overfitting toolkit (PSR, DSR, MinTRL, PBO, White's Reality Check, Hansen's SPA, Pesaran–Timmermann, Henriksson–Merton, design effect, and Murphy decomposition; 55 self-checks) with an offline interactive browser companion (<code>skill-or-luck.html</code>).
+        </li>
+        <li>
+          <strong><a href="https://github.com/KilianTheMagnificent/orrery"><code>KilianTheMagnificent/orrery</code></a></strong> (<a href="https://kilianthemagnificent.github.io/orrery/">live demo</a>) —
+          Offline, zero-dependency counterfactual decision instrument comparing three paths across risk postures, reproducible uncertainty fields, and smallest-flip assumption analysis (16 automated tests).
+        </li>
+        <li>
+          <strong><a href="https://github.com/KilianTheMagnificent/broadsheet-obsidian-theme"><code>KilianTheMagnificent/broadsheet-obsidian-theme</code></a></strong> —
+          High-contrast newspaper theme for Obsidian with light (<em>Day</em>) and dark (<em>Night Print</em>) modes, editorial typography, masthead titles, ruled tables, and four accent presets with zero network requests.
+        </li>
       </ul>
     </main>
 
     <footer class="site-footer">
       <span>© 2026 Andre Romero-Carey · Static HTML/CSS · No analytics or external scripts</span>
       <span>
+        <a href="feed.xml">Atom Feed</a> ·
         <a href="https://github.com/KilianTheMagnificent">GitHub</a> ·
         <a href="https://www.linkedin.com/in/andre-romerocarey">LinkedIn</a>
       </span>

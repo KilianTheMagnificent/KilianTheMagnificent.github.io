@@ -1,0 +1,311 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>Coordinating Coding Agents and Catching Real Bugs with CI Oracles — Andre Romero-Carey</title>
+  <meta name="description" content="How a non-coder coordinates parallel coding agents with wcp and uses Linux GitHub Actions CI as an independent oracle to catch five real cross-platform, concurrency, and floating-point bugs across wcp (232 tests) and luck-filter (55 tests).">
+  <meta name="author" content="Andre Romero-Carey">
+  <meta property="og:title" content="Coordinating Coding Agents and Catching Real Bugs with CI Oracles — Andre Romero-Carey">
+  <meta property="og:description" content="How a non-coder coordinates parallel coding agents with wcp and uses Linux GitHub Actions CI as an independent oracle to catch five real cross-platform, concurrency, and floating-point bugs across wcp (232 tests) and luck-filter (55 tests).">
+  <meta property="og:type" content="article">
+  <meta property="og:url" content="https://kilianthemagnificent.github.io/notes/coordinating-coding-agents-with-ci-oracles.html">
+  <meta name="twitter:card" content="summary">
+  <link rel="canonical" href="https://kilianthemagnificent.github.io/notes/coordinating-coding-agents-with-ci-oracles.html">
+  <link rel="alternate" type="application/atom+xml" title="Andre Romero-Carey — Notes" href="https://kilianthemagnificent.github.io/feed.xml">
+  <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2318181b'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='700' fill='%23fcfcfa' text-anchor='middle'%3EAR%3C/text%3E%3C/svg%3E">
+  <link rel="stylesheet" href="../styles.css">
+</head>
+<body>
+  <div class="container">
+    <header class="site-header">
+      <a class="site-brand" href="../">Andre Romero-Carey</a>
+      <nav class="site-nav" aria-label="Primary">
+        <a href="../">All Notes</a>
+        <a href="verifying-ai-contributions-without-reading-code.html">← Previous Note</a>
+        <a href="https://github.com/KilianTheMagnificent/wcp">wcp Repo</a>
+        <a href="https://github.com/KilianTheMagnificent/luck-filter">luck-filter Repo</a>
+        <a href="https://github.com/KilianTheMagnificent">GitHub</a>
+      </nav>
+    </header>
+
+    <article>
+      <div class="article-meta">
+        Published 2026-11-18 · Repos: <a href="https://github.com/KilianTheMagnificent/wcp"><code>KilianTheMagnificent/wcp</code></a> (<code>a3e20b8</code>), <a href="https://github.com/KilianTheMagnificent/luck-filter"><code>KilianTheMagnificent/luck-filter</code></a> (<code>3180f16</code>) · Oracles: Ubuntu CI (Python 3.11–3.13) + local Python 3.14
+      </div>
+      <h1>Coordinating Coding Agents and Catching Real Bugs with CI Oracles</h1>
+      <p class="article-lede">
+        Running multiple coding agents on the same repository fails in two predictable ways: parallel agents overwrite or silently invalidate each other's files, and tests that pass on a single macOS laptop hide operating-system, math-library, and scheduling bugs. As a non-coder directing AI assistants without reading Python implementations line by line, I cannot spot a Linux syscall mismatch or a subtle pause-race by eyeballing a diff. What works instead is pairing workspace isolation (<a href="https://github.com/KilianTheMagnificent/wcp"><code>wcp</code></a>) with a clean, multi-version Linux CI runner as an independent oracle. On November 18, 2026, pushing two stdlib-only Python repositories—<code>wcp</code> (232 tests) and <a href="https://github.com/KilianTheMagnificent/luck-filter"><code>luck-filter</code></a> (55 tests)—to GitHub Actions Ubuntu CI immediately exposed five concrete bugs that passed locally on macOS. This note records every one of them with exact commit SHAs, error messages, code changes, and reproducible commands.
+      </p>
+
+      <nav class="toc" aria-label="Table of contents">
+        <div class="toc-title">Contents</div>
+        <ol>
+          <li><a href="#why-ci-oracle">Why One Green Laptop Is Not Enough</a></li>
+          <li><a href="#wcp-coordination">Isolating Parallel Agents Before They Collide (<code>wcp</code>)</a></li>
+          <li><a href="#wcp-bugs">Four Real Bugs Caught in <code>wcp</code> (232 Tests)</a></li>
+          <li><a href="#luck-filter-bug">One Floating-Point &amp; Boundary Bug Caught in <code>luck-filter</code> (55 Tests)</a></li>
+          <li><a href="#summary-matrix">Bug Matrix &amp; Non-Coder CI Workflow</a></li>
+          <li><a href="#reproduce">Reproduce</a></li>
+          <li><a href="#limits">Scope &amp; Honest Limits</a></li>
+        </ol>
+      </nav>
+
+      <h2 id="why-ci-oracle" class="no-rule">1. Why One Green Laptop Is Not Enough</h2>
+      <p>
+        In <a href="verifying-ai-contributions-without-reading-code.html">Verifying AI-Assisted Contributions Without Reading Code</a>, the core rule is to replace trust in an assistant's summary with an independent oracle. When you own a repository that runs on both macOS and Linux—or coordinates background processes—your own laptop is still only one environment:
+      </p>
+      <ul>
+        <li><strong>Kernel and syscall semantics differ:</strong> macOS accepts POSIX flag combinations (such as <code>fchmodat</code> with <code>AT_SYMLINK_NOFOLLOW</code>) that Linux rejects.</li>
+        <li><strong>C math libraries round differently:</strong> Apple <code>libm</code> and Linux <code>glibc</code> can differ by a few ULPs on <code>lgamma</code> and <code>exp</code>, exposing missing analytical boundary checks.</li>
+        <li><strong>Process scheduling exposes races:</strong> A slower container runner with a different PID-1 reaper and CPU cadence hits timing windows between subprocess exit and coordinator polling that rarely fire on a fast local machine.</li>
+        <li><strong>Newer runtimes tighten warnings:</strong> Running the same suite on Python 3.14 surfaces unclosed SQLite connection warnings that older versions stay quiet about.</li>
+      </ul>
+      <p>
+        None of those defects require reading the code yourself to detect. You only need a clean remote CI matrix (here, GitHub Actions <code>ubuntu-latest</code> running Python <code>3.11</code>, <code>3.12</code>, and <code>3.13</code>) plus a rule that a red CI run is treated as a real defect to diagnose and fix—never as noise to bypass.
+      </p>
+
+      <h2 id="wcp-coordination">2. Isolating Parallel Agents Before They Collide (<code>wcp</code>)</h2>
+      <p>
+        Before CI even runs, coordinating two or more coding agents on one repository creates its own failure mode: one agent edits a file while another runs tests or rewrites the same path, leaving dirty trees or silently reverting work. <a href="https://github.com/KilianTheMagnificent/wcp"><code>wcp</code></a> (Workspace Coordination Protocol, v0.3.0, zero external dependencies, Python 3.9+) enforces a mechanical boundary between agents:
+      </p>
+      <ul>
+        <li><strong>One canonical checkout, isolated detached worktrees:</strong> Builders never write directly to the canonical repository; each claimed task gets its own detached <code>git worktree</code> with a declared write scope (for example, <code>--write "src/engine/**"</code>) and optional shared resources.</li>
+        <li><strong>Leases and fencing epochs:</strong> Every claim carries a time-bounded lease and monotonic epoch stored in SQLite with <code>fcntl.flock</code> advisory locks; stale epochs are refused even if their diff would cleanly apply.</li>
+        <li><strong>Hash-bound submissions and fresh-candidate verification:</strong> <code>wcp task submit</code> records before/after SHA-256 hashes, and <code>wcp task verify</code> re-runs the repository's declared check command against a fresh candidate built from current canonical before publishing atomically.</li>
+      </ul>
+      <p>
+        The same discipline applies to developing <code>wcp</code> itself: all 232 unit and integration tests live in <code>tests/</code> (covering database fencing, descriptor-relative safe file writes, git worktree lifecycle, hook execution, and multi-task runner loops) and run on every push in <a href="https://github.com/KilianTheMagnificent/wcp/blob/main/.github/workflows/ci.yml"><code>.github/workflows/ci.yml</code></a>.
+      </p>
+
+      <h2 id="wcp-bugs">3. Four Real Bugs Caught in <code>wcp</code> (232 Tests)</h2>
+      <p>
+        After tagging the initial public release of <code>wcp</code> (<a href="https://github.com/KilianTheMagnificent/wcp/commit/7a520f7fe71d4ce92eb89ebd6243772169ea06dd"><code>7a520f7</code></a>), running the 232-test suite across local Python 3.14 and Ubuntu GitHub Actions CI (Python 3.11–3.13) surfaced four distinct bugs in sequence. Each became its own minimal, verifiable commit:
+      </p>
+
+      <h3>3.1 Python 3.14 SQLite <code>ResourceWarning</code>s (<a href="https://github.com/KilianTheMagnificent/wcp/commit/ca5d376f20dda0f5f07614424f654a203e4c47f7"><code>ca5d376</code></a>)</h3>
+      <p>
+        Running the suite under Python 3.14 emitted SQLite <code>ResourceWarning</code> messages because <a href="https://github.com/KilianTheMagnificent/wcp/blob/a3e20b8527b4c430cc7468cc89082301354ce001/wcp/cli.py#L76-L82"><code>_open(ns)</code> in <code>wcp/cli.py</code></a> opened a database connection for CLI commands without closing it before <code>main()</code> returned, and several tests in <a href="https://github.com/KilianTheMagnificent/wcp/blob/a3e20b8527b4c430cc7468cc89082301354ce001/tests/test_db.py"><code>tests/test_db.py</code></a> left connections for garbage collection.
+      </p>
+      <p>
+        <strong>Fix:</strong> Track every connection opened by <code>_open(ns)</code> on <code>ns._conns</code> and close all of them in a <code>finally:</code> block at the bottom of <code>main()</code> (<a href="https://github.com/KilianTheMagnificent/wcp/blob/a3e20b8527b4c430cc7468cc89082301354ce001/wcp/cli.py#L486-L514"><code>wcp/cli.py</code></a>), and register <code>self.addCleanup(conn.close)</code> for every connection opened in <code>tests/test_db.py</code>.
+      </p>
+
+      <h3>3.2 Linux <code>fchmodat(AT_SYMLINK_NOFOLLOW)</code> Incompatibility (<a href="https://github.com/KilianTheMagnificent/wcp/commit/4a289b263aa900944bc5b88088ea2ce04a43dde4"><code>4a289b2</code></a>)</h3>
+      <p>
+        On the very first Linux CI run, <code>wcp</code> failed at import time before a single test executed. To prevent symlink races when toggling executable bits, <code>wcp/paths.py</code> originally asserted:
+      </p>
+<pre><code>if os.chmod not in os.supports_dir_fd or os.chmod not in os.supports_follow_symlinks:
+    raise RuntimeError("wcp needs os.chmod(dir_fd=, follow_symlinks=False)")</code></pre>
+      <p>
+        That check passed on macOS, where <code>fchmodat(..., AT_SYMLINK_NOFOLLOW)</code> is supported. On Linux, <code>fchmodat</code> does not support <code>AT_SYMLINK_NOFOLLOW</code>, so Python excludes <code>os.chmod</code> from <code>os.supports_follow_symlinks</code> and <code>wcp</code> immediately aborted.
+      </p>
+      <p>
+        <strong>Fix:</strong> Commit <a href="https://github.com/KilianTheMagnificent/wcp/commit/4a289b263aa900944bc5b88088ea2ce04a43dde4"><code>4a289b2</code></a> replaced the module guard with <code>hasattr(os, "fchmod")</code>, updated the Ubuntu CI matrix from <code>["3.9", "3.12"]</code> to <code>["3.11", "3.12", "3.13"]</code>, and rewrote <a href="https://github.com/KilianTheMagnificent/wcp/blob/a3e20b8527b4c430cc7468cc89082301354ce001/wcp/paths.py#L156-L180"><code>set_exec_bit()</code> in <code>wcp/paths.py</code></a> to open the target descriptor directly with <code>O_NOFOLLOW</code>, inspect it with <code>os.fstat</code>, and update permissions with <code>os.fchmod</code>:
+      </p>
+<pre><code>        try:
+            rfd = os.open(name, os.O_RDONLY | os.O_NOFOLLOW, dir_fd=fd)
+        except OSError as e:
+            if e.errno in _NOFOLLOW_ERRNOS:
+                raise _unsafe(rel, name, "not a regular file")
+            raise
+        try:
+            st = os.fstat(rfd)
+            if not stat.S_ISREG(st.st_mode):
+                raise _unsafe(rel, name, "not a regular file")
+            perm = st.st_mode &amp; 0o7777
+            if mode == "100755":
+                new = perm | ((perm &amp; 0o444) &gt;&gt; 2)
+            else:
+                new = perm &amp; ~0o111
+            if new != perm:
+                os.fchmod(rfd, new)
+        finally:
+            os.close(rfd)</code></pre>
+      <p>
+        Besides restoring Linux portability, operating on the already-open file descriptor <code>rfd</code> closes the time-of-check/time-of-use window between <code>stat</code> and <code>chmod</code> on both macOS and Linux.
+      </p>
+
+      <h3>3.3 Linux PID-1 Grandchild Reaping Race in <code>tests/test_gitx.py</code> (<a href="https://github.com/KilianTheMagnificent/wcp/commit/b231597c89040b42bf1ca879b9bf4e7a5543d3c1"><code>b231597</code></a>)</h3>
+      <p>
+        Once <code>wcp</code> imported on Linux, CI caught a process-reaping race in <a href="https://github.com/KilianTheMagnificent/wcp/blob/a3e20b8527b4c430cc7468cc89082301354ce001/tests/test_gitx.py#L298-L327"><code>ChecksTests.test_run_check_validates_cwd_and_kills_process_group_on_timeout</code></a>. The test launches a Python child that spawns a sleeping grandchild, writes the grandchild's PID to disk, and times out after 1 second so <code>gitx.run_check</code> kills the entire process group.
+      </p>
+      <p>
+        Immediately after <code>run_check</code> returned, the test ran <code>os.kill(grandchild_pid, 0)</code> once and asserted <code>ProcessLookupError</code>. On Linux CI, once the intermediate child died, the terminated grandchild was reparented to PID 1 and could briefly remain a zombie until PID 1 reaped it—during which <code>os.kill(grandchild_pid, 0)</code> still succeeds even though the grandchild is already dead.
+      </p>
+      <p>
+        <strong>Fix:</strong> Commit <a href="https://github.com/KilianTheMagnificent/wcp/commit/b231597c89040b42bf1ca879b9bf4e7a5543d3c1"><code>b231597</code></a> replaced the instant probe with a bounded 2.0-second monotonic poll (20 ms interval), still failing loudly with <code>grandchild process %d survived timeout kill</code> if the process actually survived timeout termination.
+      </p>
+
+      <h3>3.4 Real Concurrency Bug: <code>Runner.summary()</code> Pause-Race (<a href="https://github.com/KilianTheMagnificent/wcp/commit/a3e20b8527b4c430cc7468cc89082301354ce001"><code>a3e20b8</code></a>)</h3>
+      <p>
+        The most important catch was not a platform quirk or test-timing issue—it was a genuine state-machine bug in the multi-agent coordinator itself (<a href="https://github.com/KilianTheMagnificent/wcp/blob/a3e20b8527b4c430cc7468cc89082301354ce001/wcp/run.py#L515-L525"><code>Runner.summary()</code> in <code>wcp/run.py</code></a>).
+      </p>
+      <p>
+        In <code>Runner.loop()</code>, each poll cycle calls <code>self._iterate()</code> (which steps every non-terminal task) and immediately calls <code>self.summary()</code>. Previously, <code>summary()</code> decided whether the whole run had settled into <code>paused</code> with:
+      </p>
+<pre><code>        if len(accepted) == len(rts):
+            status = 'done'
+        elif paused and self._live_count() == 0:
+            status = 'paused'
+        else:
+            status = 'running'</code></pre>
+      <p>
+        That check contained a subtle race whenever two sibling tasks ran concurrently and one paused (for example, after a failed build):
+      </p>
+      <ol>
+        <li>During <code>_iterate()</code>, task <code>a</code> is in state <code>building</code> and its builder subprocess is still alive, so <code>_step(a)</code> leaves <code>a</code> in <code>building</code>.</li>
+        <li>Task <code>b</code> fails and transitions to <code>paused</code>.</li>
+        <li>In the small window <em>after</em> <code>_step(a)</code> returns and <em>before</em> <code>summary()</code> runs, task <code>a</code>'s builder subprocess finishes cleanly and exits.</li>
+        <li><code>summary()</code> sees <code>paused</code> is non-empty and <code>self._live_count() == 0</code>, so it returns <code>status = 'paused'</code> and breaks out of <code>Runner.loop()</code>—abandoning task <code>a</code> in <code>building</code> before the next iteration can reap its exit code, submit its bundle, and verify it. The same gap applied to siblings already in <code>submit_pending</code> or <code>verifying</code>.</li>
+      </ol>
+      <p>
+        <strong>Fix:</strong> Commit <a href="https://github.com/KilianTheMagnificent/wcp/commit/a3e20b8527b4c430cc7468cc89082301354ce001"><code>a3e20b8</code></a> added an explicit two-line check on durable task status so the runner never pauses while any sibling task still needs reaping, submission, or verification:
+      </p>
+<pre><code>        in_flight = any(r['status'] in ('building', 'submit_pending', 'verifying') for r in rts)
+        if len(accepted) == len(rts):
+            status = 'done'
+        elif paused and not in_flight and self._live_count() == 0:
+            status = 'paused'
+        else:
+            status = 'running'</code></pre>
+      <p>
+        With that fix in place, all 232 tests passed cleanly across Python 3.11, 3.12, and 3.13 on Ubuntu CI as well as locally.
+      </p>
+
+      <h2 id="luck-filter-bug">4. One Floating-Point &amp; Boundary Bug Caught in <code>luck-filter</code> (55 Tests)</h2>
+      <p>
+        The exact same CI-as-oracle pattern caught a subtle numerical bug the same evening in <a href="https://github.com/KilianTheMagnificent/luck-filter"><code>luck-filter</code></a> (v1.0.0, a 55-test stdlib-only Python toolkit for multiple-testing and backtest-overfitting checks, paired with the offline interactive companion at <a href="https://kilianthemagnificent.github.io/luck-filter/"><code>kilianthemagnificent.github.io/luck-filter/</code></a>).
+      </p>
+      <p>
+        After updating the Ubuntu CI matrix to Python 3.11–3.13 (<a href="https://github.com/KilianTheMagnificent/luck-filter/commit/4ba26d14fab38e84afae268724518d7783126a76"><code>4ba26d1</code></a>), all 55 tests had already passed locally on macOS—yet Ubuntu Linux CI failed on line 541 of <a href="https://github.com/KilianTheMagnificent/luck-filter/blob/3180f161174b3a835726067d5b041df694ceddc3/test_luckfilter.py#L538-L543"><code>test_luckfilter.py</code></a>:
+      </p>
+<pre><code>@check("binomial test: exact tail, and the edges")
+def _():
+    close(L.binomial_test(10, 10, 0.5), 0.5 ** 10, 1e-15)
+    close(L.binomial_test(0, 10, 0.5), 1.0, 1e-15)
+    close(L.binomial_test(6, 10, 0.5), 0.376953125, 1e-12)</code></pre>
+      <p>
+        The CI failure printed a deceptively puzzling error message (because <code>close()</code> formats both sides with <code>%.12g</code>):
+      </p>
+<pre><code>AssertionError: 1 != 1 (tol 1e-15)</code></pre>
+      <p>
+        Why did <code>binomial_test(0, 10, 0.5)</code> pass on macOS and fail on Linux? Because <code>binomial_test</code> summed log-space binomial terms computed with <code>math.lgamma</code> and <code>math.exp</code> (<code>_log_comb</code> and <code>_sum_exp</code> in <a href="https://github.com/KilianTheMagnificent/luck-filter/blob/3180f161174b3a835726067d5b041df694ceddc3/luckfilter.py#L712-L723"><code>luckfilter.py</code></a>) and clamped the sum from above with <code>min(1.0, ...)</code>. On macOS, floating-point rounding landed at or above <code>1.0</code> (or within <code>1e-15</code> below it). On Linux, glibc's <code>lgamma</code>/<code>exp</code> rounding left the full-support sum slightly <em>below</em> <code>1.0</code> by more than <code>1e-15</code>, where <code>min(1.0, ...)</code> could not hide it.
+      </p>
+      <p>
+        <strong>Fix (<a href="https://github.com/KilianTheMagnificent/luck-filter/commit/3180f161174b3a835726067d5b041df694ceddc3"><code>3180f16</code></a>):</strong> Instead of relaxing the test tolerance, <a href="https://github.com/KilianTheMagnificent/luck-filter/blob/3180f161174b3a835726067d5b041df694ceddc3/luckfilter.py#L742-L757"><code>binomial_test()</code> in <code>luckfilter.py</code></a> now handles the mathematically exact boundary cases directly before entering log-space:
+      </p>
+<pre><code>def binomial_test(successes, n, p0):
+    """Exact one-sided binomial p-value, P(X &gt;= successes) under rate p0."""
+    if not 0.0 &lt;= p0 &lt;= 1.0:
+        raise LuckFilterError("p0 must lie in [0, 1]")
+    if successes &lt;= 0:
+        return 1.0
+    if successes &gt; n:
+        return 0.0
+    if p0 == 0.0:
+        return 0.0
+    if p0 == 1.0:
+        return 1.0
+    lp, lq = math.log(p0), math.log1p(-p0)
+    return min(1.0, _sum_exp([_log_comb(n, k) + k * lp + (n - k) * lq
+                              for k in range(successes, n + 1)]))</code></pre>
+      <p>
+        Inspecting those four boundary branches also fixed a real logic bug on the <code>p0 == 1.0</code> line: the previous code had written <code>return 1.0 if successes &gt;= n else 0.0</code>, which returned <code>0.0</code> whenever <code>0 &lt; successes &lt; n</code> and <code>p0 == 1.0</code>—even though under <code>p0 == 1.0</code>, <code>X = n</code> almost surely so <code>P(X &gt;= successes)</code> is <code>1.0</code> for every <code>successes &lt;= n</code> and <code>0.0</code> only when <code>successes &gt; n</code>. Checking <code>successes &lt;= 0</code> and <code>successes &gt; n</code> first makes both <code>p0 == 0.0</code> and <code>p0 == 1.0</code> exact.
+      </p>
+
+      <h2 id="summary-matrix">5. Bug Matrix &amp; Non-Coder CI Workflow</h2>
+      <div class="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Repo &amp; Commit</th>
+              <th>Oracle That Caught It</th>
+              <th>Symptom</th>
+              <th>Root Cause &amp; Fix</th>
+            </tr>
+          </thead>
+          <tbody>
+            <tr>
+              <td><code>wcp</code> <a href="https://github.com/KilianTheMagnificent/wcp/commit/ca5d376f20dda0f5f07614424f654a203e4c47f7"><code>ca5d376</code></a></td>
+              <td>Local Python 3.14 test run</td>
+              <td>SQLite <code>ResourceWarning</code>s on CLI / DB tests</td>
+              <td>Closed CLI connections in <code>main()</code> <code>finally</code> (<a href="https://github.com/KilianTheMagnificent/wcp/blob/a3e20b8527b4c430cc7468cc89082301354ce001/wcp/cli.py"><code>wcp/cli.py</code></a>) and registered <code>addCleanup(conn.close)</code> in <code>tests/test_db.py</code>.</td>
+            </tr>
+            <tr>
+              <td><code>wcp</code> <a href="https://github.com/KilianTheMagnificent/wcp/commit/4a289b263aa900944bc5b88088ea2ce04a43dde4"><code>4a289b2</code></a></td>
+              <td>Ubuntu Linux CI (Python 3.11–3.13)</td>
+              <td>Import-time <code>RuntimeError</code> on <code>os.chmod</code></td>
+              <td>Linux lacks <code>fchmodat(AT_SYMLINK_NOFOLLOW)</code>; switched <a href="https://github.com/KilianTheMagnificent/wcp/blob/a3e20b8527b4c430cc7468cc89082301354ce001/wcp/paths.py#L156-L180"><code>set_exec_bit()</code></a> to <code>O_RDONLY | O_NOFOLLOW</code> + <code>os.fstat</code> + <code>os.fchmod</code>.</td>
+            </tr>
+            <tr>
+              <td><code>wcp</code> <a href="https://github.com/KilianTheMagnificent/wcp/commit/b231597c89040b42bf1ca879b9bf4e7a5543d3c1"><code>b231597</code></a></td>
+              <td>Ubuntu Linux CI</td>
+              <td>Timeout test failed on immediate <code>os.kill(grandchild_pid, 0)</code></td>
+              <td>Reparented Linux grandchild awaited PID-1 reaping; polled with 2.0 s deadline in <a href="https://github.com/KilianTheMagnificent/wcp/blob/a3e20b8527b4c430cc7468cc89082301354ce001/tests/test_gitx.py#L319-L327"><code>tests/test_gitx.py</code></a>.</td>
+            </tr>
+            <tr>
+              <td><code>wcp</code> <a href="https://github.com/KilianTheMagnificent/wcp/commit/a3e20b8527b4c430cc7468cc89082301354ce001"><code>a3e20b8</code></a></td>
+              <td>Ubuntu Linux CI</td>
+              <td>Run paused while sibling task was un-reaped</td>
+              <td>Builder exited between <code>_step()</code> and <code>summary()</code>; gated pause on <code>not in_flight</code> for <code>building</code>/<code>submit_pending</code>/<code>verifying</code> in <a href="https://github.com/KilianTheMagnificent/wcp/blob/a3e20b8527b4c430cc7468cc89082301354ce001/wcp/run.py#L519-L522"><code>wcp/run.py</code></a>.</td>
+            </tr>
+            <tr>
+              <td><code>luck-filter</code> <a href="https://github.com/KilianTheMagnificent/luck-filter/commit/3180f161174b3a835726067d5b041df694ceddc3"><code>3180f16</code></a></td>
+              <td>Ubuntu Linux CI (Python 3.11–3.13)</td>
+              <td><code>AssertionError: 1 != 1 (tol 1e-15)</code> at <code>binomial_test(0, 10, 0.5)</code></td>
+              <td>glibc <code>lgamma</code>/<code>exp</code> drift below <code>1.0</code>; added exact guards for <code>successes &lt;= 0</code>, <code>successes &gt; n</code>, and fixed <code>p0 == 1.0</code> in <a href="https://github.com/KilianTheMagnificent/luck-filter/blob/3180f161174b3a835726067d5b041df694ceddc3/luckfilter.py#L742-L757"><code>luckfilter.py</code></a>.</td>
+            </tr>
+          </tbody>
+        </table>
+      </div>
+      <p>
+        You do not need to write Python yourself to run this feedback loop reliably:
+      </p>
+      <ol>
+        <li><strong>Isolate concurrent agent edits first:</strong> Give each agent its own worktree and declared write scope (via <code>wcp</code> or separate branches) so two agents never race on the same working tree.</li>
+        <li><strong>Treat cross-OS CI as a required gate, not a formality:</strong> Pair local macOS runs with a Linux GitHub Actions matrix spanning multiple runtime versions (for example Python 3.11, 3.12, and 3.13).</li>
+        <li><strong>Never loosen a failing assertion before diagnosing why it failed:</strong> If we had raised the tolerance in <code>test_luckfilter.py</code> from <code>1e-15</code> to <code>1e-12</code>, we would have hidden both the missing <code>successes &lt;= 0</code> boundary guard and the inverted <code>p0 == 1.0</code> branch. If we had retried CI after the <code>Runner.summary()</code> failure, a real race in <code>wcp/run.py</code> would have shipped.</li>
+        <li><strong>Keep one commit per diagnosed failure:</strong> Small, single-purpose commits make it obvious which CI failure each change resolved and make regressions easy to bisect.</li>
+      </ol>
+
+      <h2 id="reproduce">6. Reproduce</h2>
+      <p>
+        Both repositories use only the Python 3.9+ standard library and require no packages or network access once cloned:
+      </p>
+<pre><code># 1. Reproduce wcp (232 unit &amp; integration tests)
+git clone https://github.com/KilianTheMagnificent/wcp.git &amp;&amp; cd wcp
+./bin/wcp --json version
+python3 -W default -m unittest discover -s tests -v
+
+# 2. Reproduce luck-filter (55 self-checks + built-in demo)
+git clone https://github.com/KilianTheMagnificent/luck-filter.git &amp;&amp; cd luck-filter
+python3 -B test_luckfilter.py
+python3 -B luckfilter.py --demo</code></pre>
+      <p>
+        To inspect the exact boundary behavior in <code>luck-filter</code> directly:
+      </p>
+<pre><code>python3 -B -c "import luckfilter as L; print(L.binomial_test(0, 10, 0.5), L.binomial_test(3, 10, 1.0), L.binomial_test(11, 10, 1.0))"
+# Expected output: 1.0 1.0 0.0</code></pre>
+
+      <h2 id="limits">7. Scope &amp; Honest Limits</h2>
+      <ul>
+        <li><strong>CI only catches what tests and environments exercise:</strong> A green Ubuntu matrix across Python 3.11–3.13 catches Linux syscall, glibc, and container-scheduling differences, not Windows behavior (<code>wcp</code> explicitly requires a POSIX environment with <code>fcntl.flock</code> and <code>os.fchmod</code>) or logic paths lacking tests.</li>
+        <li><strong>Tests are still AI-assisted code:</strong> When coding agents write both implementation and tests, a passing suite can still miss an unstated requirement. That is why every CI failure needs an explicit check that the fix addresses the underlying invariant—not a weakened assertion.</li>
+        <li><strong>Isolation is not a security sandbox:</strong> <code>wcp</code> coordinates cooperative coding agents and prevents accidental workspace collisions, stale publishes, and sensitive-path writes; it is not an OS/VM security boundary against hostile code.</li>
+        <li><strong>No human line-by-line code review:</strong> Both <code>wcp</code> and <code>luck-filter</code> were developed with AI coding assistants under Andre's direction, verified through automated suites, multi-version CI, and empirical CLI checks rather than manual line-by-line software engineering review. Outside pull requests remain closed in favor of reproducible issue reports.</li>
+      </ul>
+
+      <div class="callout">
+        <strong>Related Notes &amp; Toolkit</strong>
+        For the earlier non-coder verification walkthroughs across upstream issues and owned releases, see <a href="verifying-ai-contributions-without-reading-code.html">Verifying AI-Assisted Contributions Without Reading Code</a> and the reusable pre-flight policy scanner and checklists in <a href="https://github.com/KilianTheMagnificent/agent-verification-playbook"><code>KilianTheMagnificent/agent-verification-playbook</code></a>.
+      </div>
+    </article>
+
+    <footer class="site-footer">
+      <span><a href="../">← Back to Notes</a></span>
+      <span><a href="verifying-ai-contributions-without-reading-code.html">← Previous: Verifying AI Contributions</a></span>
+    </footer>
+  </div>
+</body>
+</html>

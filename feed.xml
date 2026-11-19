@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="utf-8"?>
+<feed xmlns="http://www.w3.org/2005/Atom">
+  <title>Andre Romero-Carey — Notes</title>
+  <subtitle>Technical notes on verifying AI-assisted software without reading code, multi-agent coordination with CI oracles, input validation, and machine-checked Lean 4 verification.</subtitle>
+  <id>https://kilianthemagnificent.github.io/</id>
+  <link href="https://kilianthemagnificent.github.io/feed.xml" rel="self" type="application/atom+xml"/>
+  <link href="https://kilianthemagnificent.github.io/" rel="alternate" type="text/html"/>
+  <updated>2026-11-18T22:00:00Z</updated>
+  <author>
+    <name>Andre Romero-Carey</name>
+    <uri>https://github.com/KilianTheMagnificent</uri>
+  </author>
+
+  <entry>
+    <title>Coordinating Coding Agents and Catching Real Bugs with CI Oracles</title>
+    <id>https://kilianthemagnificent.github.io/notes/coordinating-coding-agents-with-ci-oracles.html</id>
+    <link href="https://kilianthemagnificent.github.io/notes/coordinating-coding-agents-with-ci-oracles.html" rel="alternate" type="text/html"/>
+    <published>2026-11-18T22:00:00Z</published>
+    <updated>2026-11-18T22:00:00Z</updated>
+    <summary>How a non-coder isolates parallel coding agents with wcp and uses multi-version Linux GitHub Actions CI as an independent oracle to catch five real cross-platform, concurrency, and floating-point bugs across wcp (232 tests) and luck-filter (55 tests).</summary>
+  </entry>
+
+  <entry>
+    <title>Verifying AI-Assisted Contributions Without Reading Code</title>
+    <id>https://kilianthemagnificent.github.io/notes/verifying-ai-contributions-without-reading-code.html</id>
+    <link href="https://kilianthemagnificent.github.io/notes/verifying-ai-contributions-without-reading-code.html" rel="alternate" type="text/html"/>
+    <published>2026-11-18T18:20:00Z</published>
+    <updated>2026-11-18T18:20:00Z</updated>
+    <summary>How a non-coder verifies AI-assisted open-source work with independent oracles across three verified case studies: modelcontextprotocol/inspector#2980 (merged in PR #3016), google-deepmind/formal-conjectures#7590 (backed by open-proofs), and the four-invoice behavioral walkthrough in inbox-guard v0.1.0.</summary>
+  </entry>
+
+  <entry>
+    <title>Checking Untrusted AI-Authored Lean 4 Proofs</title>
+    <id>https://kilianthemagnificent.github.io/notes/lean4-verifier-adversarial-suite.html</id>
+    <link href="https://kilianthemagnificent.github.io/notes/lean4-verifier-adversarial-suite.html" rel="alternate" type="text/html"/>
+    <published>2026-11-16T17:00:00Z</published>
+    <updated>2026-11-18T17:47:00Z</updated>
+    <summary>Why lake build plus a sorry grep fails when unattended coding agents write Lean 4 proofs. Walks through the 5-layer proof checker in open-proofs, its 48 self-test checks (41 negative tamper/bypass checks plus 7 positive controls), scope limits, and the negation proofs behind google-deepmind/formal-conjectures#7590.</summary>
+  </entry>
+
+  <entry>
+    <title>Screening Untrusted Office Inputs Before LLM Triage</title>
+    <id>https://kilianthemagnificent.github.io/notes/untrusted-office-input-defenses.html</id>
+    <link href="https://kilianthemagnificent.github.io/notes/untrusted-office-input-defenses.html" rel="alternate" type="text/html"/>
+    <published>2026-11-16T17:00:00Z</published>
+    <updated>2026-11-18T17:47:00Z</updated>
+    <summary>Design, code mechanics, and known limitations of inbox-guard: magic-byte attachment checks, Unicode U+202E and Windows/SMB filename spoofing, accounting-safe OWASP CSV neutralization, WHATWG HTML5 comment and linear CSS hidden-content scanning, Plane-14 Unicode Tag stripping, and randomized session-scoped PII tokenization.</summary>
+  </entry>
+</feed>
