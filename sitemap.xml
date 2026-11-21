@@ -1,0 +1,23 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<urlset xmlns="http://www.sitemaps.org/schemas/sitemap/0.9">
+  <url>
+    <loc>https://kilianthemagnificent.github.io/</loc>
+    <lastmod>2026-11-20</lastmod>
+  </url>
+  <url>
+    <loc>https://kilianthemagnificent.github.io/notes/coordinating-coding-agents-with-ci-oracles.html</loc>
+    <lastmod>2026-11-18</lastmod>
+  </url>
+  <url>
+    <loc>https://kilianthemagnificent.github.io/notes/verifying-ai-contributions-without-reading-code.html</loc>
+    <lastmod>2026-11-18</lastmod>
+  </url>
+  <url>
+    <loc>https://kilianthemagnificent.github.io/notes/lean4-verifier-adversarial-suite.html</loc>
+    <lastmod>2026-11-18</lastmod>
+  </url>
+  <url>
+    <loc>https://kilianthemagnificent.github.io/notes/untrusted-office-input-defenses.html</loc>
+    <lastmod>2026-11-18</lastmod>
+  </url>
+</urlset>

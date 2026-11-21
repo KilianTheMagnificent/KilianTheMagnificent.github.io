@@ -10,7 +10,12 @@
   <meta property="og:description" content="Technical notes by Andre Romero-Carey on verifying AI-assisted work without reading code, multi-agent coordination with CI oracles, input validation, and machine-checked Lean 4 verification.">
   <meta property="og:type" content="website">
   <meta property="og:url" content="https://kilianthemagnificent.github.io/">
-  <meta name="twitter:card" content="summary">
+  <meta property="og:image" content="https://kilianthemagnificent.github.io/og-card.png">
+  <meta property="og:image:width" content="1200">
+  <meta property="og:image:height" content="630">
+  <meta property="og:image:alt" content="Andre Romero-Carey — Technical notes on verifying AI-assisted software without reading code">
+  <meta name="twitter:card" content="summary_large_image">
+  <meta name="twitter:image" content="https://kilianthemagnificent.github.io/og-card.png">
   <link rel="canonical" href="https://kilianthemagnificent.github.io/">
   <link rel="alternate" type="application/atom+xml" title="Andre Romero-Carey — Notes" href="https://kilianthemagnificent.github.io/feed.xml">
   <link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect width='32' height='32' rx='6' fill='%2318181b'/%3E%3Ctext x='16' y='22' font-family='monospace' font-size='16' font-weight='700' fill='%23fcfcfa' text-anchor='middle'%3EAR%3C/text%3E%3C/svg%3E">
@@ -21,7 +26,9 @@
     <header class="site-header">
       <a class="site-brand" href="./">Andre Romero-Carey</a>
       <nav class="site-nav" aria-label="Primary">
+        <a href="#demos">Live Demos</a>
         <a href="#notes">Notes</a>
+        <a href="#upstream">Upstream</a>
         <a href="#repositories">Repositories</a>
         <a href="feed.xml">Feed</a>
         <a href="https://github.com/KilianTheMagnificent">GitHub</a>
@@ -34,8 +41,34 @@
       <p class="subtitle">Technical notes · St. Louis, MO</p>
 
       <p>
-        Personal repositories and technical notes on verifying AI-assisted software without reading code, coordinating parallel coding agents with CI oracles, input validation, and machine-checked Lean 4 verification—specifically what breaks when untrusted files, inbound mail, CSV exports, concurrent agent worktrees, or AI-generated proof scripts pass into compilers, spreadsheets, CI runners, or external model APIs without explicit checks in front of them. All tamper/bypass modules, disguised binary headers, CSV formula strings, and hidden HTML/Unicode markers referenced below are synthetic local regression fixtures in these repositories.
+        Zero-dependency tools and technical notes on verifying AI-assisted software without reading code—using CI oracles, isolated agent worktrees, defensive input checks, backtest-overfitting statistics, and machine-checked Lean 4 proofs. All bypass, disguised-header, formula-injection, and hidden-HTML fixtures referenced below are synthetic local regression tests.
       </p>
+
+      <h2 id="demos">Live interactive demos</h2>
+      <div class="demo-grid">
+        <div class="demo-card">
+          <div class="note-card-meta">Offline browser app · Statistics</div>
+          <h3><a href="https://kilianthemagnificent.github.io/luck-filter/">Skill, or Luck? (<code>luck-filter</code>)</a></h3>
+          <p>
+            Watch pure random noise manufacture a “publishable” Sharpe ratio, then stress-test your own backtest with Deflated Sharpe Ratio, Minimum Track Record Length, and same-day clustering traps.
+          </p>
+          <div class="demo-card-links">
+            <a href="https://kilianthemagnificent.github.io/luck-filter/">Open live demo →</a>
+            <a href="https://github.com/KilianTheMagnificent/luck-filter">Source &amp; CLI</a>
+          </div>
+        </div>
+        <div class="demo-card">
+          <div class="note-card-meta">Offline browser app · Decision instrument</div>
+          <h3><a href="https://kilianthemagnificent.github.io/orrery/">ORRERY — Find the smallest fact</a></h3>
+          <p>
+            Compare three paths across risk postures, run 800 seeded uncertainty draws, find the smallest single-variable assumption that flips the choice, and share fields via offline URL hashes or JSON snapshots.
+          </p>
+          <div class="demo-card-links">
+            <a href="https://kilianthemagnificent.github.io/orrery/">Open live demo →</a>
+            <a href="https://github.com/KilianTheMagnificent/orrery">Source</a>
+          </div>
+        </div>
+      </div>
 
       <h2 id="notes">Notes</h2>
       <ul class="note-list">
@@ -73,46 +106,73 @@
       </ul>
 
       <h2 id="upstream">Upstream contributions</h2>
+      <p>
+        Verified issue reproductions, empirical audits, and bug reports filed with explicit AI disclosure and reproducible commands:
+      </p>
       <ul>
         <li>
-          <a href="https://github.com/modelcontextprotocol/inspector/issues/2980"><code>modelcontextprotocol/inspector#2980</code></a> → merged in <a href="https://github.com/modelcontextprotocol/inspector/pull/3016"><code>PR #3016</code></a> (2026-11-18; credited) —
-          Tested <code>test-servers/configs/demo.json</code> locally over stdio with Codex (disclosed in the comment) against the 2.15.0 fixture, confirming <code>server-composable.js --config</code> exposed <code>echo</code> and <code>get_temp</code> and removing <code>get_temp</code> left only <code>echo</code>, and suggested linking <code>configs/demo.json</code> as the minimal runnable stdio example in the new composable test server config reference. Maintainer <code>cliffhall</code> included the example in merged <code>PR #3016</code>, crediting the issue comment.
+          <a href="https://github.com/modelcontextprotocol/inspector/issues/2980"><code>modelcontextprotocol/inspector#2980</code></a> → <strong>merged</strong> in <a href="https://github.com/modelcontextprotocol/inspector/pull/3016"><code>PR #3016</code></a> (2026-11-18; credited) —
+          Tested <code>test-servers/configs/demo.json</code> over stdio against the 2.15.0 fixture and proposed it as the runnable stdio config example; maintainer <code>cliffhall</code> shipped the example and tool-list check in merged <code>PR #3016</code>.
         </li>
         <li>
-          <a href="https://github.com/google-deepmind/formal-conjectures/issues/7590"><code>google-deepmind/formal-conjectures#7590</code></a> (2026-10-24; open, 2026-11-18 follow-up posted) —
-          Applied a missing-quantified-parameter pattern earlier contributors had reported (<code>#7327</code>, <code>#7434</code>, <code>#7493</code>) to 8 remaining open value-question declarations across 7 Erdős problems (<code>142</code> [2 declarations], <code>319</code>, <code>321</code>, <code>361</code>, <code>409</code> <code>variants.sigma</code>, <code>503</code>, and <code>692</code> <code>parts.ii</code>) whose <code>answer</code> placeholder omitted a quantified parameter (<code>k</code>, <code>N</code>, <code>c</code>, or <code>n</code>), making each formal statement false for every value of the placeholder. Backed by kernel-checked Lean 4 negation proofs (built with Claude Code, disclosed in the issue) using only <code>propext</code>, <code>Classical.choice</code>, and <code>Quot.sound</code>. Separate upstream PRs later parameterized 4 of the 8 declarations independently (<code>#7946</code>, <code>#8015</code>); a 2026-11-18 follow-up (checked against upstream <code>b576d52</code> with Codex, disclosed in the comment) tracks the 4 remaining statements, which are also covered by open upstream <a href="https://github.com/google-deepmind/formal-conjectures/pull/7990"><code>PR #7990</code></a> (linked to <code>#7977</code>).
+          <a href="https://github.com/ActivityWatch/activitywatch/issues/1540"><code>ActivityWatch/activitywatch#1540</code></a> — <strong>closed as completed</strong> (2026-11-19) —
+          Verified the published <code>v0.14.3</code> Tauri DMG natively on macOS arm64 in an isolated <code>HOME</code>, confirming stale LaunchAgent refresh, failed legacy migration retention/retry, and second-instance exit before the reporter confirmed the autostart fix and closed the issue.
+        </li>
+        <li>
+          <a href="https://github.com/ActivityWatch/activitywatch/issues/1537"><code>ActivityWatch/activitywatch#1537</code></a> → <strong>fix PR opened</strong> (<a href="https://github.com/ActivityWatch/aw-webui/pull/1294"><code>aw-webui#1294</code></a>, 2026-11-19) —
+          Verified <code>#/settings/categorization</code> end-to-end on <code>v0.14.3</code>, confirming <code>aw-server</code> returned actionable read-only JSON while <code>CategorizationSettings.vue</code> dropped <code>e.response.data.message</code> into an opaque HTTP 500 alert; contributor <code>TimeToBuildBob</code> opened the web UI fix PR.
+        </li>
+        <li>
+          <a href="https://github.com/google/adk-python/issues/8247"><code>google/adk-python#8247</code></a> → <strong>assigned &amp; fix PR opened</strong> (<a href="https://github.com/google/adk-python/pull/8249"><code>PR #8249</code></a>, 2026-11-19) —
+          Reproduced a Pydantic <code>extra_forbidden</code> failure in the Redis integration Quick Start snippet (<code>Agent(instructions=...)</code> instead of <code>instruction=</code>) via <code>adk-verify-snippets</code>; assigned to maintainer <code>sanketpatil06</code> with fix <code>PR #8249</code> opened.
+        </li>
+        <li>
+          <a href="https://github.com/modelcontextprotocol/registry/issues/1862"><code>modelcontextprotocol/registry#1862</code></a> → <strong>fix PR opened</strong> (<a href="https://github.com/modelcontextprotocol/registry/pull/1868"><code>PR #1868</code></a>, 2026-11-19) —
+          Live 50-entry stratified npm/PyPI package audit uncovering unpublished npm HTTP 200 tombstones in <code>probeNPMPackage</code> and PyPI PEP 440 normalization false positives; contributor <code>lanbass869-cell</code> opened <code>PR #1868</code> fixing the tombstone bug and re-bucketing 68 rows.
+        </li>
+        <li>
+          <a href="https://github.com/google-deepmind/formal-conjectures/issues/7590"><code>google-deepmind/formal-conjectures#7590</code></a> → <strong>4 fixed, 4 in approved <a href="https://github.com/google-deepmind/formal-conjectures/pull/7990"><code>PR #7990</code></a></strong> (2026-10-24; follow-up 2026-11-18) —
+          Kernel-checked Lean 4 negation proofs (<code>propext</code>, <code>Classical.choice</code>, <code>Quot.sound</code> only) showing 8 Erdős value-question declarations omitted a quantified parameter; 4 were parameterized in <code>#7946</code>/<code>#8015</code> and the remaining 4 are fixed in approved <code>PR #7990</code>.
+        </li>
+        <li>
+          <a href="https://github.com/openai/openai-agents-python/issues/6036"><code>openai/openai-agents-python#6036</code></a> (2026-11-18; <strong>confirmed on fix branch</strong>) —
+          Offline <code>ScriptedRealtimeModel</code> verification covering <code>debounce_text_length=1</code>, duplicate-check overshoot, audio retirement ordering, and superseded <code>response_id</code> leaks; reporter <code>MagicBeards</code> confirmed and mapped all three findings onto fix branch <code>f24ea36d</code>.
+        </li>
+        <li>
+          <a href="https://github.com/modelcontextprotocol/inspector/issues/3021"><code>modelcontextprotocol/inspector#3021</code></a> (2026-11-18; <strong>reproduced across macOS, Windows &amp; Linux</strong>) —
+          Reported deterministic bug where exporting <code>MCP_CATALOG_PATH</code> breaks <code>--config</code> across all four inspector clients (<code>--cli</code>, <code>mcpdo</code>, <code>--web</code>, <code>--tui</code>), independently confirmed on Windows PowerShell and Linux x86_64.
         </li>
       </ul>
 
       <h2 id="repositories">Repositories</h2>
       <ul>
         <li>
-          <strong><a href="https://github.com/KilianTheMagnificent/open-proofs"><code>KilianTheMagnificent/open-proofs</code></a></strong> —
-          Lean 4 proofs and 5-layer proof checker built with Claude Code and Codex (<code>scripts/check.py</code>, <code>scripts/lint.py</code>, <code>OpenProofsChecker/Main.lean</code>): <a href="https://github.com/KilianTheMagnificent/open-proofs/blob/main/tests/run_adversarial.py">48 self-test checks</a> (41 negative tamper/bypass checks plus 7 positive controls), 131 verified proofs of textbook/test/solved statements (no open mathematical problems solved), and 11 negation certificates across 9 Erdős problems with unfiled local draft notes in <a href="https://github.com/KilianTheMagnificent/open-proofs/tree/main/outbox"><code>outbox/</code></a> and 1 filed upstream issue (<a href="https://github.com/google-deepmind/formal-conjectures/issues/7590"><code>#7590</code></a>, open with a 2026-11-18 follow-up tracking the 4 remaining declarations, covering 8 declarations across 7 Erdős problems).
-        </li>
-        <li>
-          <strong><a href="https://github.com/KilianTheMagnificent/inbox-guard"><code>KilianTheMagnificent/inbox-guard</code></a></strong> —
-          Zero-dependency Node.js attachment, CSV, and inbound-email screening plus randomized session-scoped PII tokenization, tested with <code>node:test</code> and CodeQL (<a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/main/SECURITY.md"><code>SECURITY.md</code></a>).
-        </li>
-        <li>
-          <strong><a href="https://github.com/KilianTheMagnificent/agent-verification-playbook"><code>KilianTheMagnificent/agent-verification-playbook</code></a></strong> —
-          Zero-dependency Python 3.9+ pre-flight repository AI-policy scanner (<code>scripts/check_repo_policy.py</code>, including hidden HTML comment/CSS trap and <code>.github/VOUCHED.td</code> detection), five empirical-proof issue templates, and non-coder verification checklists.
-        </li>
-        <li>
           <strong><a href="https://github.com/KilianTheMagnificent/wcp"><code>KilianTheMagnificent/wcp</code></a></strong> —
-          Workspace Coordination Protocol (v0.3.0): zero-dependency Python 3.9+ CLI coordinating parallel coding agents in one Git repository via isolated detached worktrees, declared write scopes, leases with fencing epochs, and hash-bound verified publishes (232 tests, Ubuntu CI Python 3.11–3.13).
+          Workspace Coordination Protocol (v0.3.0): zero-dependency Python 3.9+ CLI coordinating parallel coding agents in one Git repository via isolated detached worktrees, declared write scopes, leases with fencing epochs, and hash-bound verified publishes (236 tests, Ubuntu &amp; macOS CI Python 3.9–3.13).
         </li>
         <li>
           <strong><a href="https://github.com/KilianTheMagnificent/luck-filter"><code>KilianTheMagnificent/luck-filter</code></a></strong> (<a href="https://kilianthemagnificent.github.io/luck-filter/">live demo</a>) —
-          Zero-dependency Python 3.9+ multiple-testing and backtest-overfitting toolkit (PSR, DSR, MinTRL, PBO, White's Reality Check, Hansen's SPA, Pesaran–Timmermann, Henriksson–Merton, design effect, and Murphy decomposition; 55 self-checks) with an offline interactive browser companion (<code>skill-or-luck.html</code>).
+          Zero-dependency Python 3.9+ multiple-testing and backtest-overfitting toolkit (PSR, DSR, MinTRL, PBO, White's Reality Check, Hansen's SPA, Pesaran–Timmermann, Henriksson–Merton, design effect, and Murphy decomposition; 58 self-checks) with an offline interactive browser companion (<code>skill-or-luck.html</code>).
         </li>
         <li>
           <strong><a href="https://github.com/KilianTheMagnificent/orrery"><code>KilianTheMagnificent/orrery</code></a></strong> (<a href="https://kilianthemagnificent.github.io/orrery/">live demo</a>) —
-          Offline, zero-dependency counterfactual decision instrument comparing three paths across risk postures, reproducible uncertainty fields, and smallest-flip assumption analysis (16 automated tests).
+          Offline, zero-dependency counterfactual decision instrument comparing three paths across risk postures, reproducible uncertainty fields, smallest-flip assumption analysis, JSON snapshot import/export, and offline URL-hash sharing (17 automated tests).
+        </li>
+        <li>
+          <strong><a href="https://github.com/KilianTheMagnificent/inbox-guard"><code>KilianTheMagnificent/inbox-guard</code></a></strong> —
+          Zero-dependency Node.js attachment, CSV, and inbound-email screening plus randomized session-scoped PII tokenization with TypeScript declarations, tested with <code>node:test</code> (16 tests) and CodeQL (<a href="https://github.com/KilianTheMagnificent/inbox-guard/blob/main/SECURITY.md"><code>SECURITY.md</code></a>).
+        </li>
+        <li>
+          <strong><a href="https://github.com/KilianTheMagnificent/agent-verification-playbook"><code>KilianTheMagnificent/agent-verification-playbook</code></a></strong> —
+          Zero-dependency Python 3.9+ pre-flight repository AI-policy scanner (<code>scripts/check_repo_policy.py</code>, including hidden HTML comment/CSS trap and <code>.github/VOUCHED.td</code> detection), five empirical-proof issue templates, and non-coder verification checklists (21 unit tests).
         </li>
         <li>
           <strong><a href="https://github.com/KilianTheMagnificent/broadsheet-obsidian-theme"><code>KilianTheMagnificent/broadsheet-obsidian-theme</code></a></strong> —
           High-contrast newspaper theme for Obsidian with light (<em>Day</em>) and dark (<em>Night Print</em>) modes, editorial typography, masthead titles, ruled tables, and four accent presets with zero network requests.
+        </li>
+        <li>
+          <strong><a href="https://github.com/KilianTheMagnificent/open-proofs"><code>KilianTheMagnificent/open-proofs</code></a></strong> —
+          Lean 4 proofs and 5-layer proof checker built with Claude Code and Codex (<code>scripts/check.py</code>, <code>scripts/lint.py</code>, <code>OpenProofsChecker/Main.lean</code>): <a href="https://github.com/KilianTheMagnificent/open-proofs/blob/main/tests/run_adversarial.py">48 self-test checks</a> (41 negative tamper/bypass checks plus 7 positive controls), 131 verified proofs of textbook/test/solved statements, and 11 negation certificates across 9 Erdős problems.
         </li>
       </ul>
     </main>
